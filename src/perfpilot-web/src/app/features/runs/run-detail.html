@@ -1,0 +1,204 @@
+@if (run(); as r) {
+  <div class="page-header">
+    <div>
+      <a routerLink="/runs" class="back-link"><i class="pi pi-arrow-left"></i> Run history</a>
+      <h1>
+        {{ r.scenarioName }}
+        <p-tag [value]="r.status" [severity]="statusSeverity(r.status)" styleClass="ml-2" />
+      </h1>
+      <div class="meta-line">
+        <span><i class="pi pi-server"></i> {{ r.environmentName }}
+          @if (r.environmentIsProduction) { <p-tag severity="danger" value="PROD" /> }</span>
+        <span class="mono small">{{ r.environmentBaseUrl }}</span>
+        <span><i class="pi pi-user"></i> {{ r.startedBy }}</span>
+        <span><i class="pi pi-clock"></i> {{ (r.startedAt ?? r.queuedAt) | date: 'medium' }}</span>
+        @if (r.durationSeconds !== null) { <span><i class="pi pi-stopwatch"></i> {{ duration(r.durationSeconds) }}</span> }
+        <span class="small muted">{{ r.scenarioSnapshot.loadProfile.preset }} profile</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      @if (isActive()) {
+        <p-button label="Cancel run" icon="pi pi-stop" severity="danger" [outlined]="true" [loading]="cancelling()" (onClick)="cancel()" />
+      } @else {
+        <a class="p-button p-button-outlined" [href]="api.runReportUrl(r.id)"><i class="pi pi-file-export"></i>&nbsp;HTML report</a>
+        @if (r.scenarioId) {
+          <p-button label="Run again" icon="pi pi-replay" [text]="true" (onClick)="rerun()" />
+          <p-button label="Scenario" icon="pi pi-sitemap" [text]="true" [routerLink]="['/scenarios', r.scenarioId]" />
+        }
+      }
+      <a class="p-button p-button-text" [href]="api.runScriptUrl(r.id)" pTooltip="The exact k6 script that ran"><i class="pi pi-code"></i>&nbsp;Script</a>
+      @if (r.hasSummary) {
+        <a class="p-button p-button-text" [href]="api.runSummaryUrl(r.id)" pTooltip="Raw k6 --summary-export JSON"><i class="pi pi-download"></i>&nbsp;k6 summary</a>
+      }
+    </div>
+  </div>
+
+  <!-- Verdict -->
+  @switch (r.status) {
+    @case ('Queued') {
+      <div class="verdict verdict-neutral"><i class="pi pi-hourglass"></i><div><strong>QUEUED</strong><span>Waiting for a free k6 runner…</span></div></div>
+    }
+    @case ('Running') {
+      <div class="verdict verdict-running">
+        <i class="pi pi-spin pi-spinner"></i>
+        <div class="flex-1">
+          <strong>RUNNING</strong>
+          <span>{{ duration(live()?.elapsedSeconds ?? 0) }} of {{ duration(plannedSeconds()) }} · live metrics every 2 s</span>
+          <p-progressbar [value]="progressPct()" [showValue]="false" styleClass="verdict-progress" />
+        </div>
+      </div>
+    }
+    @case ('Completed') {
+      @if (r.thresholdsPassed) {
+        <div class="verdict verdict-pass"><i class="pi pi-check-circle"></i><div><strong>PASSED</strong>
+          <span>{{ r.thresholdResults.length ? 'All ' + r.thresholdResults.length + ' SLA threshold(s) met.' : 'Run completed. No SLA thresholds were defined.' }}</span></div></div>
+      } @else {
+        <div class="verdict verdict-fail"><i class="pi pi-times-circle"></i><div><strong>FAILED</strong>
+          <span>{{ failedThresholds() }} of {{ r.thresholdResults.length }} SLA threshold(s) breached.</span></div></div>
+      }
+    }
+    @case ('Cancelled') {
+      <div class="verdict verdict-warn"><i class="pi pi-ban"></i><div><strong>CANCELLED</strong>
+        <span>{{ r.errorMessage }} Results below cover the part that ran.</span></div></div>
+    }
+    @case ('Failed') {
+      <div class="verdict verdict-fail"><i class="pi pi-exclamation-triangle"></i><div><strong>ERROR</strong>
+        <span class="pre-wrap">{{ r.errorMessage }}</span>
+        @if (r.exitCode !== null) { <span class="small">k6 exit code {{ r.exitCode }}</span> }</div></div>
+    }
+  }
+
+  <!-- KPIs -->
+  @if (isActive()) {
+    <div class="kpis">
+      <div class="kpi"><span>Virtual users</span><strong>{{ live()?.vus ?? 0 }}</strong></div>
+      <div class="kpi"><span>Requests/s</span><strong>{{ num(live()?.rps ?? 0, 1) }}</strong></div>
+      <div class="kpi"><span>p95 latency</span><strong>{{ live() ? ms(live()!.p95Ms) : '–' }}</strong></div>
+      <div class="kpi"><span>Error rate</span><strong [class.text-danger]="(live()?.errorRate ?? 0) > 0">{{ pct(live()?.errorRate ?? 0) }}</strong></div>
+      <div class="kpi"><span>Requests</span><strong>{{ num(live()?.totalRequests ?? 0) }}</strong></div>
+      <div class="kpi"><span>Failed</span><strong>{{ num(live()?.totalFailed ?? 0) }}</strong></div>
+    </div>
+  } @else if (r.overall.count > 0) {
+    <div class="kpis">
+      <div class="kpi"><span>Requests</span><strong>{{ num(r.overall.count) }}</strong></div>
+      <div class="kpi"><span>Throughput</span><strong>{{ num(r.overall.rps, 2) }} <small>req/s</small></strong></div>
+      <div class="kpi"><span>Avg latency</span><strong>{{ ms(r.overall.avgMs) }}</strong></div>
+      <div class="kpi"><span>p95 latency</span><strong>{{ ms(r.overall.p95Ms) }}</strong></div>
+      <div class="kpi"><span>p99 latency</span><strong>{{ ms(r.overall.p99Ms) }}</strong></div>
+      <div class="kpi"><span>Error rate</span><strong [class.text-danger]="r.overall.errorRate > 0">{{ pct(r.overall.errorRate) }}</strong></div>
+      <div class="kpi"><span>Status checks</span><strong>{{ checksRate(r.checksPassed, r.checksFailed) }}</strong></div>
+    </div>
+  }
+
+  <!-- Thresholds -->
+  @if (!isActive() && r.thresholdResults.length > 0) {
+    <section class="panel">
+      <h2>SLA thresholds</h2>
+      <p-table [value]="r.thresholdResults" [tableStyle]="{ 'min-width': '40rem' }">
+        <ng-template #header>
+          <tr><th>Scope</th><th>Metric</th><th class="num">Limit</th><th class="num">Actual</th><th>Result</th></tr>
+        </ng-template>
+        <ng-template #body let-t>
+          <tr [class.row-breach]="!t.passed">
+            <td>{{ t.scopeName }}</td>
+            <td>{{ slaLabel(t.metric) }}</td>
+            <td class="num">{{ formatSla(t.metric, t.limit, true) }}</td>
+            <td class="num">{{ formatSla(t.metric, t.actual, false) }}</td>
+            <td>@if (t.passed) { <span class="verdict-pill pass">PASS</span> } @else { <span class="verdict-pill fail">FAIL</span> }</td>
+          </tr>
+        </ng-template>
+      </p-table>
+    </section>
+  }
+
+  <!-- Endpoints -->
+  @if (!isActive() && r.endpointResults.length > 0) {
+    <section class="panel">
+      <h2>Endpoints</h2>
+      <p-table [value]="r.endpointResults" [tableStyle]="{ 'min-width': '64rem' }">
+        <ng-template #header>
+          <tr>
+            <th>Endpoint</th><th class="num">Requests</th><th class="num">RPS</th><th class="num">Avg</th><th class="num">p50</th><th class="num">p90</th>
+            <th class="num">p95</th><th class="num">p99</th><th class="num">Max</th><th class="num">Errors</th><th class="num">Checks</th>
+          </tr>
+        </ng-template>
+        <ng-template #body let-e>
+          <tr>
+            <td><span [class]="methodClass(e.method)">{{ e.method }}</span> <span class="mono">{{ e.path }}</span>
+              @if (e.name !== e.method + ' ' + e.path) { <div class="small muted">{{ e.name }}</div> }</td>
+            <td class="num">{{ num(e.metrics.count) }}</td>
+            <td class="num" [class.cell-breach]="breached(e.key, 'MinRps')">{{ num(e.metrics.rps, 2) }}</td>
+            <td class="num">{{ ms(e.metrics.avgMs) }}</td>
+            <td class="num">{{ ms(e.metrics.p50Ms) }}</td>
+            <td class="num">{{ ms(e.metrics.p90Ms) }}</td>
+            <td class="num" [class.cell-breach]="breached(e.key, 'P95')">{{ ms(e.metrics.p95Ms) }}</td>
+            <td class="num" [class.cell-breach]="breached(e.key, 'P99')">{{ ms(e.metrics.p99Ms) }}</td>
+            <td class="num">{{ ms(e.metrics.maxMs) }}</td>
+            <td class="num" [class.cell-breach]="breached(e.key, 'ErrorRate')">{{ pct(e.metrics.errorRate) }}</td>
+            <td class="num">{{ checksRate(e.checksPassed, e.checksFailed) }}</td>
+          </tr>
+        </ng-template>
+      </p-table>
+      <p class="small muted">Highlighted cells breached that endpoint's SLA.</p>
+    </section>
+  }
+
+  <!-- Charts -->
+  @if (series().length > 0) {
+    <section class="panel">
+      <h2>Over time</h2>
+      <div class="charts">
+        <div class="chart-box">
+          <h3>Latency percentiles</h3>
+          <p-chart type="line" [data]="latencyChart()" [options]="latencyOptions" height="260px" />
+        </div>
+        <div class="chart-box">
+          <h3>Throughput &amp; virtual users</h3>
+          <p-chart type="line" [data]="throughputChart()" [options]="throughputOptions" height="260px" />
+        </div>
+        <div class="chart-box">
+          <h3>Error rate</h3>
+          <p-chart type="line" [data]="errorChart()" [options]="errorOptions" height="260px" />
+        </div>
+      </div>
+    </section>
+  } @else if (isActive()) {
+    <section class="panel empty"><i class="pi pi-spin pi-spinner"></i> Waiting for the first metrics from k6…</section>
+  }
+
+  <!-- Configuration snapshot -->
+  <section class="panel">
+    <h2>Configuration snapshot</h2>
+    <div class="grid-2">
+      <div>
+        <h3>Stages</h3>
+        <table class="simple-table">
+          <thead><tr><th>#</th><th>Duration</th><th class="num">Target VUs</th></tr></thead>
+          <tbody>
+            @for (st of r.scenarioSnapshot.loadProfile.stages; track $index) {
+              <tr><td>{{ $index + 1 }}</td><td class="mono">{{ st.duration }}</td><td class="num">{{ st.target }}</td></tr>
+            }
+          </tbody>
+        </table>
+        <p class="small muted">Think time {{ r.scenarioSnapshot.loadProfile.thinkTimeMinSeconds }}–{{ r.scenarioSnapshot.loadProfile.thinkTimeMaxSeconds }} s</p>
+      </div>
+      <div>
+        <h3>Traffic mix</h3>
+        <table class="simple-table">
+          <thead><tr><th>Endpoint</th><th class="num">Weight</th><th>Expected</th></tr></thead>
+          <tbody>
+            @for (ep of r.scenarioSnapshot.endpoints; track $index) {
+              <tr>
+                <td><span [class]="methodClass(ep.method)">{{ ep.method }}</span> <span class="mono">{{ ep.path }}</span></td>
+                <td class="num">{{ ep.weight }}%</td>
+                <td class="mono small">{{ ep.expectedStatusCodes.join(', ') }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+} @else {
+  <div class="panel empty"><i class="pi pi-spin pi-spinner"></i> Loading run…</div>
+}

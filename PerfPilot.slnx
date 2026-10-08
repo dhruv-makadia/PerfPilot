@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PerfPilot.Api/PerfPilot.Api.csproj" />
+    <Project Path="src/PerfPilot.Core/PerfPilot.Core.csproj" />
+    <Project Path="src/PerfPilot.Infrastructure/PerfPilot.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PerfPilot.Tests/PerfPilot.Tests.csproj" />
+  </Folder>
+</Solution>

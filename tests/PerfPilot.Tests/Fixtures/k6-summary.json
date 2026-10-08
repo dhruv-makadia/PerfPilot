@@ -1,0 +1,62 @@
+{
+    "metrics": {
+        "http_req_duration": {
+            "avg": 250.5, "min": 90.1, "med": 210.2, "max": 1500.9, "p(90)": 400.3, "p(95)": 520.4, "p(99)": 900.7, "count": 1210
+        },
+        "http_req_duration{kind:test}": {
+            "avg": 240.25, "min": 95.5, "med": 200.75, "max": 1400.5, "p(90)": 380.1, "p(95)": 510.2, "p(99)": 880.9, "count": 1200,
+            "thresholds": { "p(95)<=800": false }
+        },
+        "http_req_duration{endpoint:ep1}": {
+            "avg": 180.5, "min": 95.5, "med": 170.25, "max": 700.1, "p(90)": 260.5, "p(95)": 310.4, "p(99)": 650.2, "count": 840,
+            "thresholds": { "p(95)<=300": true, "p(99)<=600": true }
+        },
+        "http_req_duration{endpoint:ep2}": {
+            "avg": 380.75, "min": 150.1, "med": 350.5, "max": 1400.5, "p(90)": 520.25, "p(95)": 610.75, "p(99)": 1200.3, "count": 360,
+            "thresholds": { "max>=0": false }
+        },
+        "http_req_failed": { "passes": 14, "fails": 1196, "value": 0.011570247933884297 },
+        "http_req_failed{kind:test}": {
+            "passes": 12, "fails": 1188, "value": 0.01,
+            "thresholds": { "rate<=0.01": false }
+        },
+        "http_req_failed{endpoint:ep1}": {
+            "passes": 0, "fails": 840, "value": 0,
+            "thresholds": { "rate>=0": false }
+        },
+        "http_req_failed{endpoint:ep2}": {
+            "passes": 12, "fails": 348, "value": 0.03333333333333333,
+            "thresholds": { "rate<=0.005": true }
+        },
+        "http_reqs": { "count": 1210, "rate": 20.166666666666668 },
+        "http_reqs{kind:test}": {
+            "count": 1200, "rate": 20,
+            "thresholds": { "rate>=5": false }
+        },
+        "http_reqs{endpoint:ep1}": {
+            "count": 840, "rate": 14,
+            "thresholds": { "count>=0": false }
+        },
+        "http_reqs{endpoint:ep2}": {
+            "count": 360, "rate": 6,
+            "thresholds": { "rate>=1.5": false }
+        },
+        "checks": { "passes": 1188, "fails": 12, "value": 0.99 },
+        "vus": { "value": 0, "min": 0, "max": 10 },
+        "iterations": { "count": 1200, "rate": 20 }
+    },
+    "root_group": {
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+            "ep1 GET /pet/{petId} status in [200,404]": {
+                "name": "ep1 GET /pet/{petId} status in [200,404]", "path": "::ep1 GET /pet/{petId} status in [200,404]", "id": "a1", "passes": 840, "fails": 0
+            },
+            "ep2 Create pet status in [200]": {
+                "name": "ep2 Create pet status in [200]", "path": "::ep2 Create pet status in [200]", "id": "a2", "passes": 348, "fails": 12
+            }
+        }
+    }
+}

@@ -1,0 +1,25 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+
+# Angular
+node_modules/
+.angular/
+dist/
+
+# Angular build output served by the API
+src/PerfPilot.Api/wwwroot/
+
+# Runtime data (k6 work files, logs, Data Protection keys)
+src/PerfPilot.Api/work/
+src/PerfPilot.Api/logs/
+src/PerfPilot.Api/keys/
+
+# Locally extracted tools (e.g. a k6 binary)
+tools/
+
+# Snapshot test output awaiting review
+*.received.*

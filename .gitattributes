@@ -1,0 +1,3 @@
+* text=auto
+# Snapshot files are compared byte-for-byte; keep LF on every OS.
+*.verified.js text eol=lf

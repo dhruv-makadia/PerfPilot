@@ -1,0 +1,69 @@
+swagger: "2.0"
+info:
+  title: Orders API
+  version: "2.1"
+host: orders.internal
+basePath: /v2
+schemes:
+  - https
+consumes:
+  - application/json
+produces:
+  - application/json
+paths:
+  /orders:
+    get:
+      tags: [orders]
+      summary: List orders
+      parameters:
+        - name: page
+          in: query
+          type: integer
+          default: 1
+        - name: X-Tenant
+          in: header
+          type: string
+          required: true
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: [orders]
+      summary: Create an order
+      parameters:
+        - name: body
+          in: body
+          required: true
+          schema:
+            $ref: "#/definitions/NewOrder"
+      responses:
+        "201":
+          description: Created
+  /orders/{orderId}:
+    get:
+      tags: [orders]
+      summary: Get an order
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not found
+definitions:
+  NewOrder:
+    type: object
+    required: [customerEmail, quantity]
+    properties:
+      customerEmail:
+        type: string
+        format: email
+      quantity:
+        type: integer
+        minimum: 1
+      express:
+        type: boolean

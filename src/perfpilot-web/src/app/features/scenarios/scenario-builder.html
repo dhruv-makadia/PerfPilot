@@ -1,0 +1,350 @@
+<div class="page-header">
+  <div>
+    <a routerLink="/scenarios" class="back-link"><i class="pi pi-arrow-left"></i> Scenarios</a>
+    <h1>
+      {{ id() ? s.name || 'Scenario' : 'New scenario' }}
+      @if (isDirty()) {
+        <p-tag value="Unsaved changes" severity="warn" styleClass="ml-2" />
+      }
+    </h1>
+  </div>
+  <div class="header-actions">
+    @if (id()) {
+      <p-button icon="pi pi-trash" severity="danger" [text]="true" pTooltip="Delete" (onClick)="deleteScenario()" />
+      <p-button icon="pi pi-copy" label="Clone" [text]="true" (onClick)="clone()" />
+      @if (scriptDownloadUrl(); as url) {
+        <a class="p-button p-button-text" [href]="url" pTooltip="Download the saved scenario's k6 script"><i class="pi pi-download"></i>&nbsp;Script</a>
+      }
+    }
+    <p-button label="Save" icon="pi pi-save" [outlined]="true" [loading]="saving()" (onClick)="save()" />
+    <p-button [label]="isDirty() || !id() ? 'Save & run' : 'Run'" icon="pi pi-play" [loading]="saving()" (onClick)="saveAndRun()" />
+  </div>
+</div>
+
+<app-error-list [error]="error()" />
+
+<section class="panel">
+  <div class="grid-3">
+    <div>
+      <label class="field-label" for="sc-name">Scenario name</label>
+      <input pInputText id="sc-name" class="w-full" [(ngModel)]="s.name" placeholder="e.g. Checkout – peak hour mix" />
+    </div>
+    <div>
+      <label class="field-label" for="sc-env">Environment</label>
+      <p-select inputId="sc-env" [options]="environments()" [ngModel]="s.environmentId" (ngModelChange)="onEnvironmentChange($event)" optionLabel="name"
+        optionValue="id" placeholder="Select an environment" styleClass="w-full">
+        <ng-template #item let-env>
+          {{ env.name }}
+          @if (env.isProduction) { <p-tag severity="danger" value="PROD" styleClass="ml-2" /> }
+        </ng-template>
+      </p-select>
+      @if (selectedEnvironment(); as env) {
+        <small class="hint mono">{{ env.baseUrl }}</small>
+      }
+    </div>
+    <div>
+      <label class="field-label" for="sc-desc">Description <span class="muted">(optional)</span></label>
+      <input pInputText id="sc-desc" class="w-full" [(ngModel)]="s.description" />
+    </div>
+  </div>
+  @if (selectedEnvironment()?.isProduction) {
+    <p-message severity="error" styleClass="mt-3" size="small">This scenario targets a production environment. Starting a run requires typing the environment name.</p-message>
+  }
+</section>
+
+<p-tabs [value]="activeTab()" (valueChange)="onTabChange($event)">
+  <p-tablist>
+    <p-tab value="endpoints"><i class="pi pi-list"></i> Endpoints <span class="tab-count">{{ s.definition.endpoints.length }}</span></p-tab>
+    <p-tab value="load"><i class="pi pi-sliders-h"></i> Load profile &amp; SLA</p-tab>
+    <p-tab value="data"><i class="pi pi-table"></i> Test data</p-tab>
+    <p-tab value="script"><i class="pi pi-code"></i> k6 script</p-tab>
+  </p-tablist>
+  <p-tabpanels>
+    <!-- Endpoints -->
+    <p-tabpanel value="endpoints">
+      <div class="toolbar">
+        <p-button label="Add endpoints" icon="pi pi-plus" (onClick)="openPicker()" [disabled]="!s.environmentId" />
+        @if (s.definition.endpoints.length > 1) {
+          <p-button label="Distribute evenly" icon="pi pi-percentage" [text]="true" (onClick)="distributeEvenly()" />
+        }
+        <span class="spacer"></span>
+        @if (s.definition.endpoints.length > 0) {
+          <span class="weight-total" [class.ok]="totalWeight() === 100" [class.bad]="totalWeight() !== 100">
+            Traffic total: {{ totalWeight() }}%
+          </span>
+        }
+      </div>
+      @if (!s.environmentId) {
+        <p class="muted">Select an environment first.</p>
+      } @else if (!spec()) {
+        <p-message severity="info" styleClass="mb-3">
+          <span>No API spec imported for this environment. <a [routerLink]="['/environments', s.environmentId, 'spec']">Import one</a> to pick endpoints, or add custom endpoints manually.</span>
+        </p-message>
+      }
+
+      @for (ep of s.definition.endpoints; track $index; let i = $index) {
+        <div class="endpoint-card" [class.open]="expanded() === i">
+          <div class="endpoint-card-header">
+            <button type="button" class="endpoint-line" (click)="toggleExpanded(i)">
+              <i class="pi" [class.pi-chevron-right]="expanded() !== i" [class.pi-chevron-down]="expanded() === i"></i>
+              <span [class]="methodClass(ep.method)">{{ ep.method }}</span>
+              <span class="mono">{{ ep.path }}</span>
+              @if (ep.name) { <span class="muted">· {{ ep.name }}</span> }
+            </button>
+            <div class="weight-input">
+              <p-inputnumber [(ngModel)]="ep.weight" [min]="0" [max]="100" [maxFractionDigits]="2" suffix=" %" inputStyleClass="weight-field"
+                [ariaLabel]="'Weight for ' + ep.path" />
+            </div>
+            <p-button icon="pi pi-arrow-up" [text]="true" size="small" [disabled]="i === 0" (onClick)="moveEndpoint(i, -1)" pTooltip="Move up" />
+            <p-button icon="pi pi-arrow-down" [text]="true" size="small" [disabled]="i === s.definition.endpoints.length - 1" (onClick)="moveEndpoint(i, 1)" pTooltip="Move down" />
+            <p-button icon="pi pi-times" [text]="true" size="small" severity="danger" (onClick)="removeEndpoint(i)" pTooltip="Remove" />
+          </div>
+
+          @if (expanded() === i) {
+            <div class="endpoint-card-body">
+              <div class="grid-3">
+                <div>
+                  <label class="field-label">Display name <span class="muted">(optional)</span></label>
+                  <input pInputText class="w-full" [(ngModel)]="ep.name" [placeholder]="ep.method + ' ' + ep.path" />
+                </div>
+                <div>
+                  <label class="field-label">Method</label>
+                  <p-select [options]="methods" [(ngModel)]="ep.method" optionLabel="label" optionValue="value" styleClass="w-full" />
+                </div>
+                <div>
+                  <label class="field-label">Expected status code(s)</label>
+                  <input pInputText class="w-full mono" [value]="statusText(ep)" (change)="setStatuses(ep, $any($event.target).value)" placeholder="200, 201" />
+                </div>
+              </div>
+              <label class="field-label">Path</label>
+              <input pInputText class="w-full mono" [(ngModel)]="ep.path" />
+
+              <h4>Parameters</h4>
+              @if (ep.parameters.length > 0) {
+                <table class="simple-table param-table">
+                  <thead>
+                    <tr><th>Name</th><th>In</th><th>Value source</th><th>Value</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    @for (p of ep.parameters; track $index; let pi = $index) {
+                      <tr>
+                        <td><input pInputText class="w-full mono" [(ngModel)]="p.name" [pTooltip]="specParamHint(ep, p.name)" /></td>
+                        <td><p-select [options]="locations" [(ngModel)]="p.in" optionLabel="label" optionValue="value" styleClass="w-full" /></td>
+                        <td><p-select [options]="modes" [(ngModel)]="p.mode" optionLabel="label" optionValue="value" styleClass="w-full" /></td>
+                        <td>
+                          @if (p.mode === 'CsvColumn') {
+                            <p-select [options]="csvColumns()" [(ngModel)]="p.csvColumn" placeholder="Choose a column (Test data tab)" styleClass="w-full" />
+                          } @else {
+                            <input pInputText class="w-full mono" [(ngModel)]="p.value" placeholder="value or {{ ph('random.int') }}" />
+                          }
+                        </td>
+                        <td><p-button icon="pi pi-trash" [text]="true" size="small" severity="danger" (onClick)="removeParameter(ep, pi)" /></td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              } @else {
+                <p class="muted small">No parameters.</p>
+              }
+              <div class="toolbar">
+                <p-button label="Query parameter" icon="pi pi-plus" size="small" [text]="true" (onClick)="addParameter(ep, 'Query')" />
+                <p-button label="Header" icon="pi pi-plus" size="small" [text]="true" (onClick)="addParameter(ep, 'Header')" />
+                <p-button label="Path parameter" icon="pi pi-plus" size="small" [text]="true" (onClick)="addParameter(ep, 'Path')" />
+              </div>
+
+              <h4>Request body</h4>
+              @if (ep.body !== null) {
+                <div class="grid-body">
+                  <app-json-editor [(value)]="ep.body" [sample]="sampleFor(ep)" [rows]="12" [label]="'Body for ' + ep.path" />
+                  <div class="placeholder-help">
+                    <div class="small"><strong>Placeholders</strong></div>
+                    <code>{{ ph('random.int') }}</code> <code>{{ ph('random.guid') }}</code> <code>{{ ph('random.email') }}</code>
+                    @for (c of csvColumns(); track c) { <code>{{ ph('csv.' + c) }}</code> }
+                    <p class="small muted">Use them inside strings (<code>"{{ ph('random.email') }}"</code>) or bare for numbers (<code>{{ ph('random.int') }}</code>).</p>
+                    <label class="field-label">Content-Type</label>
+                    <input pInputText class="w-full mono" [(ngModel)]="ep.contentType" placeholder="application/json" />
+                    <p-button label="Remove body" icon="pi pi-times" size="small" [text]="true" severity="secondary" (onClick)="ep.body = null" styleClass="mt-2" />
+                  </div>
+                </div>
+              } @else if (hasBodyEditor(ep)) {
+                <p-button label="Add request body" icon="pi pi-plus" size="small" [outlined]="true" (onClick)="enableBody(ep)" />
+              } @else {
+                <p class="muted small">{{ ep.method }} requests are sent without a body.
+                  <a href="#" (click)="$event.preventDefault(); enableBody(ep)">Add one anyway</a></p>
+              }
+
+              <h4>Endpoint SLA <span class="muted small">(optional, leave empty to skip)</span></h4>
+              <div class="grid-4">
+                <div><label class="field-label">p95 ≤ (ms)</label><p-inputnumber [(ngModel)]="ep.thresholds.p95Ms" [min]="1" styleClass="w-full" /></div>
+                <div><label class="field-label">p99 ≤ (ms)</label><p-inputnumber [(ngModel)]="ep.thresholds.p99Ms" [min]="1" styleClass="w-full" /></div>
+                <div><label class="field-label">Error rate ≤ (%)</label><p-inputnumber [(ngModel)]="ep.thresholds.maxErrorRatePercent" [min]="0" [max]="100" [maxFractionDigits]="2" styleClass="w-full" /></div>
+                <div><label class="field-label">Throughput ≥ (req/s)</label><p-inputnumber [(ngModel)]="ep.thresholds.minRps" [min]="0" [maxFractionDigits]="2" styleClass="w-full" /></div>
+              </div>
+            </div>
+          }
+        </div>
+      } @empty {
+        @if (s.environmentId) {
+          <div class="empty">No endpoints yet. Click <strong>Add endpoints</strong> to pick them from the imported spec.</div>
+        }
+      }
+    </p-tabpanel>
+
+    <!-- Load profile & SLA -->
+    <p-tabpanel value="load">
+      <div class="grid-2">
+        <div>
+          <h3>Load profile</h3>
+          <p-selectbutton [options]="presetOptions" [ngModel]="s.definition.loadProfile.preset" (ngModelChange)="applyPreset($event)" optionLabel="label"
+            optionValue="value" [allowEmpty]="false" />
+          <p class="muted small mt-2">{{ presetDescription() }}</p>
+
+          <table class="simple-table stage-table">
+            <thead><tr><th>#</th><th>Duration</th><th>Target VUs</th><th></th></tr></thead>
+            <tbody>
+              @for (st of s.definition.loadProfile.stages; track $index; let si = $index) {
+                <tr>
+                  <td>{{ si + 1 }}</td>
+                  <td>
+                    <input pInputText class="mono stage-duration" [class.ng-invalid]="stageInvalid(st.duration)" [class.ng-dirty]="stageInvalid(st.duration)"
+                      [(ngModel)]="st.duration" (ngModelChange)="onStagesEdited()" placeholder="30s, 5m, 1h" />
+                  </td>
+                  <td><p-inputnumber [(ngModel)]="st.target" (ngModelChange)="onStagesEdited()" [min]="0" [showButtons]="true" inputStyleClass="stage-target" /></td>
+                  <td><p-button icon="pi pi-trash" [text]="true" size="small" severity="danger" [disabled]="s.definition.loadProfile.stages.length === 1" (onClick)="removeStage(si)" /></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+          <p-button label="Add stage" icon="pi pi-plus" size="small" [text]="true" (onClick)="addStage()" />
+
+          <div class="grid-2 mt-3">
+            <div>
+              <label class="field-label">Think time min (s)</label>
+              <p-inputnumber [(ngModel)]="s.definition.loadProfile.thinkTimeMinSeconds" [min]="0" [max]="300" [maxFractionDigits]="2" styleClass="w-full" />
+            </div>
+            <div>
+              <label class="field-label">Think time max (s)</label>
+              <p-inputnumber [(ngModel)]="s.definition.loadProfile.thinkTimeMaxSeconds" [min]="0" [max]="300" [maxFractionDigits]="2" styleClass="w-full" />
+            </div>
+          </div>
+          <p class="small muted">Each virtual user pauses a random time in this range after every request.</p>
+        </div>
+        <div>
+          <div class="kpis small-kpis">
+            <div class="kpi"><span>Total duration</span><strong>{{ formatDuration(totalDurationSeconds()) }}</strong></div>
+            <div class="kpi"><span>Peak VUs</span><strong>{{ maxVus() }}</strong></div>
+            @if (session.config(); as cfg) {
+              <div class="kpi"><span>Caps</span><strong class="small">{{ cfg.maxVus }} VUs · {{ cfg.maxDurationMinutes }} min</strong></div>
+            }
+          </div>
+          @for (w of capWarnings(); track w) {
+            <p-message severity="error" size="small" styleClass="mb-2">{{ w }}</p-message>
+          }
+          <div class="chart-box small-chart">
+            <p-chart type="line" [data]="stageChart()" [options]="stageChartOptions" height="220px" />
+          </div>
+        </div>
+      </div>
+
+      <h3>Global SLA thresholds <span class="muted small">(apply to all scenario traffic; leave empty to skip)</span></h3>
+      <div class="grid-4">
+        <div><label class="field-label">p95 ≤ (ms)</label><p-inputnumber [(ngModel)]="s.definition.globalThresholds.p95Ms" [min]="1" styleClass="w-full" /></div>
+        <div><label class="field-label">p99 ≤ (ms)</label><p-inputnumber [(ngModel)]="s.definition.globalThresholds.p99Ms" [min]="1" styleClass="w-full" /></div>
+        <div><label class="field-label">Error rate ≤ (%)</label><p-inputnumber [(ngModel)]="s.definition.globalThresholds.maxErrorRatePercent" [min]="0" [max]="100" [maxFractionDigits]="2" styleClass="w-full" /></div>
+        <div><label class="field-label">Throughput ≥ (req/s)</label><p-inputnumber [(ngModel)]="s.definition.globalThresholds.minRps" [min]="0" [maxFractionDigits]="2" styleClass="w-full" /></div>
+      </div>
+      <p class="small muted">A request counts as failed when its status is not one of the endpoint's expected codes. Per-endpoint SLAs are set on each endpoint.</p>
+    </p-tabpanel>
+
+    <!-- Test data -->
+    <p-tabpanel value="data">
+      <div class="grid-2">
+        <div>
+          <h3>CSV test data</h3>
+          <p class="muted small">Paste CSV with a header row (tab-separated data copied from a spreadsheet works too). Each request picks a random row, so values vary
+            and responses don't just come from cache. Use a column as a parameter value source, or as <code>{{ ph('csv.column') }}</code> in values and bodies.</p>
+          <textarea pTextarea class="w-full code-input" rows="14" [(ngModel)]="s.definition.csvData" placeholder="petId,status&#10;1,available&#10;2,pending"></textarea>
+        </div>
+        <div>
+          <h3>Preview</h3>
+          @if (csvPreview(); as p) {
+            @if (p.columns.length === 0) {
+              <p class="muted">No data.</p>
+            } @else {
+              <p class="small muted">{{ p.columns.length }} column(s), {{ p.total }} row(s){{ p.total > 5 ? ' — first 5 shown' : '' }}</p>
+              <div class="scroll-x">
+                <table class="simple-table">
+                  <thead><tr>@for (c of p.columns; track $index) { <th class="mono">{{ c }}</th> }</tr></thead>
+                  <tbody>
+                    @for (r of p.rows; track $index) {
+                      <tr>@for (c of p.columns; track $index) { <td class="mono small">{{ r[c] }}</td> }</tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+          }
+        </div>
+      </div>
+    </p-tabpanel>
+
+    <!-- Script preview -->
+    <p-tabpanel value="script">
+      <div class="toolbar">
+        <p-button label="Regenerate" icon="pi pi-refresh" [text]="true" [loading]="scriptLoading()" (onClick)="refreshScript()" />
+        <p-button label="Copy" icon="pi pi-copy" [text]="true" [disabled]="!script()" (onClick)="copyScript()" />
+        <p-button label="Download .js" icon="pi pi-download" [text]="true" [disabled]="!script()" (onClick)="downloadScript()" />
+        <span class="spacer"></span>
+        @if (script(); as sc) {
+          @if (sc.requiredEnvironmentVariables.length > 0) {
+            <span class="small muted">Needs env vars: @for (v of sc.requiredEnvironmentVariables; track v) { <code>{{ v }}</code> }</span>
+          }
+        }
+      </div>
+      <app-error-list [error]="scriptError()" />
+      @if (script(); as sc) {
+        <pre class="code-block script-preview">{{ sc.script }}</pre>
+      } @else if (scriptLoading()) {
+        <p class="muted"><i class="pi pi-spin pi-spinner"></i> Generating…</p>
+      }
+    </p-tabpanel>
+  </p-tabpanels>
+</p-tabs>
+
+<!-- Endpoint picker -->
+<p-dialog header="Add endpoints" [modal]="true" [visible]="pickerOpen()" (visibleChange)="pickerOpen.set($event)" [style]="{ width: '56rem' }"
+  [breakpoints]="{ '960px': '95vw' }" [draggable]="false">
+  @if (spec(); as d) {
+    <p class="small muted">From {{ d.spec.title }} (spec v{{ d.spec.version }}, {{ d.spec.endpointCount }} endpoints)</p>
+    <p-iconfield styleClass="mb-3">
+      <p-inputicon styleClass="pi pi-search" />
+      <input pInputText class="w-full" placeholder="Filter endpoints" [ngModel]="pickerFilter()" (ngModelChange)="pickerFilter.set($event)" />
+    </p-iconfield>
+    <div class="picker-list">
+      @for (g of pickerGroups(); track g.tag) {
+        <div class="picker-group">{{ g.tag }}</div>
+        @for (e of g.endpoints; track e.id) {
+          <label class="picker-item" [class.added]="isAlreadyAdded(e)">
+            <p-checkbox [binary]="true" [ngModel]="picked().has(e.id)" (ngModelChange)="togglePick(e.id, $event)" />
+            <span [class]="methodClass(e.method)">{{ e.method }}</span>
+            <span class="mono">{{ e.path }}</span>
+            <span class="muted small ellipsis">{{ e.summary }}</span>
+            @if (isAlreadyAdded(e)) { <p-tag value="added" severity="secondary" /> }
+          </label>
+        }
+      } @empty {
+        <p class="muted">No endpoints match.</p>
+      }
+    </div>
+  }
+  <div class="custom-endpoint">
+    <span class="small muted">Not in the spec?</span>
+    <p-select [options]="methods" [ngModel]="customMethod()" (ngModelChange)="customMethod.set($event)" optionLabel="label" optionValue="value" />
+    <input pInputText class="mono flex-1" [ngModel]="customPath()" (ngModelChange)="customPath.set($event)" placeholder="/orders/{id}" />
+    <p-button label="Add custom" icon="pi pi-plus" [outlined]="true" size="small" (onClick)="addCustom()" />
+  </div>
+  <ng-template #footer>
+    <p-button label="Cancel" [text]="true" severity="secondary" (onClick)="pickerOpen.set(false)" />
+    <p-button [label]="'Add ' + picked().size + ' endpoint(s)'" icon="pi pi-check" [disabled]="picked().size === 0" (onClick)="addPicked()" />
+  </ng-template>
+</p-dialog>
