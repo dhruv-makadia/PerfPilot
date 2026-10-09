@@ -18,7 +18,12 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
-    // As a Windows service the working directory is System32, so use the app folder as the content root.
+    // As a Windows service the working directory is System32. Use the app folder instead, so relative paths
+    // (Serilog's logs\, k6 work files) resolve next to the app, as they do under IIS and dotnet run.
+    if (WindowsServiceHelpers.IsWindowsService())
+    {
+        Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+    }
     var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     {
         Args = args,

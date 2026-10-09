@@ -242,7 +242,7 @@ icacls C:\Tools\k6 /grant "NT AUTHORITY\LocalService:(OI)(CI)RX"
 sc.exe create PerfPilot binPath= "C:\PerfPilot\PerfPilot.Api.exe --urls http://0.0.0.0:8080" start= delayed-auto obj= "NT AUTHORITY\LocalService" DisplayName= "PerfPilot"
 sc.exe description PerfPilot "PerfPilot API performance testing (web UI on port 8080)"
 sc.exe failure PerfPilot reset= 86400 actions= restart/60000/restart/60000/restart/60000
-sc.exe start PerfPilot
+Start-Service PerfPilot
 ```
 
 - `sc.exe` needs the space after each `=`, as written.
@@ -251,7 +251,34 @@ sc.exe start PerfPilot
 - The failure actions restart the service a minute after a crash.
 - On first start PerfPilot applies any pending database updates. That can take a few seconds.
 
-Manage it later with `sc.exe stop|start|query PerfPilot`, or in **Services** (`services.msc`).
+Manage it later with `Stop-Service`, `Start-Service` or `Restart-Service PerfPilot` (these wait until the service has actually stopped or started), or in **Services** (`services.msc`).
+
+### Change the port
+
+The port is part of the service's startup command and of the firewall rule. To move from 8080 to, say, 5080 (admin PowerShell):
+
+```powershell
+$old = 8080; $port = 5080
+
+# The port must be free and not reserved by Windows
+Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue   # no output = free
+netsh int ipv4 show excludedportrange protocol=tcp                                   # $port must not fall in a listed range
+
+Stop-Service PerfPilot                     # cancels any test in progress; check the Runs page first
+sc.exe config PerfPilot binPath= "C:\PerfPilot\PerfPilot.Api.exe --urls http://0.0.0.0:$port"
+Get-NetFirewallRule -DisplayName "PerfPilot ($old)" | Get-NetFirewallPortFilter | Set-NetFirewallPortFilter -LocalPort $port
+Set-NetFirewallRule -DisplayName "PerfPilot ($old)" -NewDisplayName "PerfPilot ($port)"
+Start-Service PerfPilot
+
+# PerfPilot needs a few seconds after starting (database check) before it answers
+foreach ($i in 1..30) { try { Invoke-RestMethod "http://localhost:$port/api/config" -TimeoutSec 2 | Select-Object -ExpandProperty k6; break } catch { Start-Sleep 1 } }
+# available : True
+```
+
+If nothing is printed after 30 seconds, check `Get-Service PerfPilot` and the newest file in `C:\PerfPilot\logs`.
+
+Then give users the new address, `http://<host>:<port>`. Nothing else changes: the database, settings and saved secrets don't depend on the port.
+If you configured `Kestrel:Endpoints` for HTTPS (section 13), change the ports there instead, because `--urls` is ignored when endpoints are configured.
 
 ---
 
@@ -281,14 +308,13 @@ From another computer:
 2. On the host (admin PowerShell):
 
 ```powershell
-sc.exe stop PerfPilot
-Start-Sleep -Seconds 5
+Stop-Service PerfPilot
 
 # Keep the current version for rollback (skip run data and logs)
 robocopy C:\PerfPilot C:\PerfPilot.previous /MIR /XD work logs /NFL /NDL /NJH /NJS | Out-Null
 
 Expand-Archive -Path <path>\PerfPilot-<new version>.zip -DestinationPath C:\PerfPilot -Force
-sc.exe start PerfPilot
+Start-Service PerfPilot
 ```
 
 3. Run the checks in section 8. Users should press **Ctrl+F5** once to load the new UI.
@@ -300,9 +326,9 @@ sc.exe start PerfPilot
 ### Roll back
 
 ```powershell
-sc.exe stop PerfPilot
+Stop-Service PerfPilot
 robocopy C:\PerfPilot.previous C:\PerfPilot /MIR /XD work logs /XF appsettings.Production.json /NFL /NDL /NJH /NJS | Out-Null
-sc.exe start PerfPilot
+Start-Service PerfPilot
 ```
 
 Older versions keep working with a database that a newer version has already updated, as long as those updates only added tables and columns, which is true so far.
@@ -318,7 +344,7 @@ Because all data is in the shared database, moving is just "install on the new m
 3. **Wait** until no test is running on the old host (Runs page).
 4. **Stop the old host:**
    ```powershell
-   sc.exe stop PerfPilot
+   Stop-Service PerfPilot
    sc.exe config PerfPilot start= disabled     # or uninstall it (section 14)
    ```
 5. **Tell users** the new address, `http://<new host>:8080`.
@@ -402,7 +428,7 @@ Plain HTTP is common on internal networks. Tokens and API keys typed into PerfPi
    }
    ```
    When `Kestrel:Endpoints` is configured, the `--urls` value in the service command is ignored. List every port you want here; drop the `Http` entry to serve HTTPS only.
-4. Open port 8443 in the firewall and restart the service (`sc.exe stop PerfPilot`, then `sc.exe start PerfPilot`).
+4. Open port 8443 in the firewall and restart the service (`Restart-Service PerfPilot`).
 
 ### Windows sign-in
 
@@ -415,7 +441,7 @@ Browsers then sign users in automatically on the domain. NTLM works without extr
 ## 14. Uninstall
 
 ```powershell
-sc.exe stop PerfPilot
+Stop-Service PerfPilot
 sc.exe delete PerfPilot
 Remove-NetFirewallRule -DisplayName "PerfPilot (8080)"
 Remove-Item -Recurse -Force C:\PerfPilot, C:\PerfPilot.previous

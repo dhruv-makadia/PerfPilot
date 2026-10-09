@@ -8,7 +8,7 @@ A practical guide for QA engineers who are new to performance testing. It covers
 - what happens in the backend when you click **Run**
 - how to **read the results** and decide whether an API performs well
 
-> PerfPilot address: **http://192.168.70.83:8080** on the office network, or http://localhost:8080 on the host machine.
+> PerfPilot address: **http://192.168.70.83:5080** on the office network, or http://localhost:5080 on the host machine.
 
 ---
 

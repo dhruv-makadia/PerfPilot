@@ -152,10 +152,10 @@ icacls C:\Tools\k6 /grant "NT AUTHORITY\LocalService:(OI)(CI)RX"
 
 sc.exe create PerfPilot binPath= "C:\PerfPilot\PerfPilot.Api.exe --urls http://0.0.0.0:8080" start= delayed-auto obj= "NT AUTHORITY\LocalService" DisplayName= "PerfPilot"
 sc.exe failure PerfPilot reset= 86400 actions= restart/60000/restart/60000/restart/60000
-sc.exe start PerfPilot
+Start-Service PerfPilot
 ```
 
-To update: `sc.exe stop PerfPilot`, publish again to `C:\PerfPilot`, then `sc.exe start PerfPilot`. Logs are in `C:\PerfPilot\logs`.
+To update: `Stop-Service PerfPilot`, publish again to `C:\PerfPilot`, then `Start-Service PerfPilot`. Logs are in `C:\PerfPilot\logs`.
 
 ### UI development (hot reload)
 
