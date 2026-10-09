@@ -14,6 +14,7 @@ public sealed class RunWorker(
     RunQueue queue,
     RunExecutor executor,
     IServiceScopeFactory scopeFactory,
+    RunnerIdentity identity,
     IOptions<K6Options> options,
     TimeProvider clock,
     ILogger<RunWorker> logger) : BackgroundService
@@ -67,7 +68,8 @@ public sealed class RunWorker(
             await using var scope = scopeFactory.CreateAsyncScope();
             var runs = scope.ServiceProvider.GetRequiredService<IRunRepository>();
 
-            foreach (var id in await runs.ListIdsByStatusAsync(RunStatus.Running, ct))
+            // Only this instance's runs: another instance sharing the database may be executing the others right now.
+            foreach (var id in await runs.ListRunningOnInstanceAsync(identity.Name, ct))
             {
                 var run = await runs.GetAsync(id, ct);
                 if (run is null)

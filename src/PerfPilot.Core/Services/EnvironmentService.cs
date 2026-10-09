@@ -18,6 +18,8 @@ public sealed class EnvironmentService(
     /// <summary>Fixed-length mask so the UI never learns the secret or its length.</summary>
     public const string SecretMask = "••••••••";
 
+    public const int MaxLoginHeaders = 20;
+
     public async Task<IReadOnlyList<EnvironmentDto>> ListAsync(CancellationToken ct)
     {
         var list = await environments.ListAsync(ct);
@@ -107,7 +109,10 @@ public sealed class EnvironmentService(
             env.LoginTokenJsonPath,
             env.LoginTokenHeaderName,
             env.LoginTokenPrefix,
-            env.LoginScope);
+            env.LoginScope,
+            env.AuthType == AuthType.LoginFlow
+                ? env.LoginHeaders.ToDictionary(h => h.Name, h => protector.Unprotect(h.ProtectedValue), StringComparer.OrdinalIgnoreCase)
+                : null);
     }
 
     private async Task ValidateNameAsync(string? name, Guid? excludeId, ValidationErrors errors, CancellationToken ct)
@@ -163,6 +168,7 @@ public sealed class EnvironmentService(
             case AuthType.BearerToken:
             case AuthType.ApiKey:
                 env.ProtectedLoginBody = null;
+                env.LoginHeaders = [];
                 env.LoginUrl = null;
                 env.LoginTokenJsonPath = null;
                 if (!string.IsNullOrEmpty(auth.Secret) && auth.Secret != SecretMask)
@@ -201,12 +207,21 @@ public sealed class EnvironmentService(
                 }
                 env.LoginUrl = auth.LoginUrl?.Trim();
 
+                var previousHeaders = typeUnchanged ? existing!.LoginHeaders : [];
+                env.LoginHeaders = auth.LoginHeaders is null
+                    ? previousHeaders.Select(h => new StoredHeader { Name = h.Name, ProtectedValue = h.ProtectedValue }).ToList()
+                    : ApplyLoginHeaders(auth.LoginHeaders, previousHeaders, errors);
+
+                // Only JSON bodies are validated; a configured Content-Type (e.g. form-urlencoded) allows other formats.
+                var contentType = env.LoginHeaders.FirstOrDefault(h => h.Name.Equals(HeaderRules.ContentType, StringComparison.OrdinalIgnoreCase)) is { } ct
+                    ? protector.Unprotect(ct.ProtectedValue)
+                    : HeaderRules.DefaultLoginContentType;
                 var bodyInvalid = false;
                 if (!string.IsNullOrWhiteSpace(auth.LoginBody))
                 {
-                    if (!IsValidJson(auth.LoginBody))
+                    if (HeaderRules.IsJson(contentType) && !IsValidJson(auth.LoginBody))
                     {
-                        errors.Add("auth.loginBody", "Login body must be valid JSON.");
+                        errors.Add("auth.loginBody", "Login body must be valid JSON. To send another format, add a Content-Type login header.");
                         bodyInvalid = true;
                     }
                     else
@@ -220,7 +235,7 @@ public sealed class EnvironmentService(
                 }
                 if (env.ProtectedLoginBody is null && !bodyInvalid)
                 {
-                    errors.Add("auth.loginBody", "Login request body (JSON) is required.");
+                    errors.Add("auth.loginBody", "Login request body is required.");
                 }
 
                 if (!JsonPathEvaluator.IsValid(auth.LoginTokenJsonPath))
@@ -239,10 +254,76 @@ public sealed class EnvironmentService(
         }
     }
 
+    /// <summary>
+    /// Builds the stored login headers from the posted list. A blank value keeps the stored value of the
+    /// header with the same name (case-insensitive), so the UI never needs to know secret values.
+    /// </summary>
+    private List<StoredHeader> ApplyLoginHeaders(IReadOnlyList<HeaderInput> input, IReadOnlyList<StoredHeader> previous, ValidationErrors errors)
+    {
+        const string field = "auth.loginHeaders";
+        var result = new List<StoredHeader>();
+        if (input.Count > MaxLoginHeaders)
+        {
+            errors.Add(field, $"At most {MaxLoginHeaders} login headers are supported.");
+            return result;
+        }
+
+        foreach (var header in input)
+        {
+            var name = header.Name?.Trim() ?? string.Empty;
+            if (name.Length == 0)
+            {
+                if (!string.IsNullOrEmpty(header.Value))
+                {
+                    errors.Add(field, "Every login header needs a name.");
+                }
+                continue;
+            }
+            if (!HeaderRules.IsValidName(name))
+            {
+                errors.Add(field, $"'{name}' is not a valid header name.");
+                continue;
+            }
+            if (HeaderRules.IsReserved(name))
+            {
+                errors.Add(field, $"The '{name}' header is set automatically and can't be configured.");
+                continue;
+            }
+            if (result.Any(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+            {
+                errors.Add(field, $"Login header '{name}' is listed more than once.");
+                continue;
+            }
+
+            string protectedValue;
+            if (!string.IsNullOrEmpty(header.Value) && header.Value != SecretMask)
+            {
+                if (!HeaderRules.IsValidValue(header.Value))
+                {
+                    errors.Add(field, $"The value of login header '{name}' can't contain line breaks.");
+                    continue;
+                }
+                protectedValue = protector.Protect(header.Value.Trim());
+            }
+            else if (previous.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) is { } kept)
+            {
+                protectedValue = kept.ProtectedValue;
+            }
+            else
+            {
+                errors.Add(field, $"Enter a value for login header '{name}'.");
+                continue;
+            }
+            result.Add(new StoredHeader { Name = name, ProtectedValue = protectedValue });
+        }
+        return result;
+    }
+
     private static void ClearAuth(TargetEnvironment env)
     {
         env.ProtectedSecret = null;
         env.ProtectedLoginBody = null;
+        env.LoginHeaders = [];
         env.ApiKeyHeaderName = null;
         env.LoginUrl = null;
         env.LoginTokenJsonPath = null;
@@ -274,6 +355,7 @@ public sealed class EnvironmentService(
         ApiKeyHeaderName = e.ApiKeyHeaderName,
         LoginUrl = e.LoginUrl,
         ProtectedLoginBody = e.ProtectedLoginBody,
+        LoginHeaders = e.LoginHeaders.Select(h => new StoredHeader { Name = h.Name, ProtectedValue = h.ProtectedValue }).ToList(),
         LoginTokenJsonPath = e.LoginTokenJsonPath,
         LoginTokenHeaderName = e.LoginTokenHeaderName,
         LoginTokenPrefix = e.LoginTokenPrefix,
@@ -299,7 +381,8 @@ public sealed class EnvironmentService(
             e.LoginTokenJsonPath,
             e.LoginTokenHeaderName,
             e.LoginTokenPrefix,
-            e.LoginScope),
+            e.LoginScope,
+            e.LoginHeaders.Select(h => h.Name).ToList()),
         e.CreatedAt,
         e.UpdatedAt,
         latestSpec is null ? null : SpecImportService.ToSummary(latestSpec));

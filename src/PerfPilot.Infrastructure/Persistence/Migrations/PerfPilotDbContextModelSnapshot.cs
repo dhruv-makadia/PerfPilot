@@ -22,6 +22,25 @@ namespace PerfPilot.Infrastructure.Persistence.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("FriendlyName")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Xml")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("DataProtectionKeys");
+                });
+
             modelBuilder.Entity("PerfPilot.Core.Domain.ApiEndpoint", b =>
                 {
                     b.Property<Guid>("Id")
@@ -320,6 +339,10 @@ namespace PerfPilot.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsProduction")
                         .HasColumnType("bit");
 
+                    b.Property<string>("LoginHeaders")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("LoginScope")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -375,6 +398,10 @@ namespace PerfPilot.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("CancelRequestedBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<string>("CancelledBy")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
@@ -412,6 +439,10 @@ namespace PerfPilot.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTimeOffset>("QueuedAt")
                         .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("RunnerInstance")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<Guid?>("ScenarioId")
                         .HasColumnType("uniqueidentifier");

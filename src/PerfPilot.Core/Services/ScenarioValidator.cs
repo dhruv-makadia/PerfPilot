@@ -21,9 +21,6 @@ public sealed partial class ScenarioValidator(IOptions<SafetyOptions> safety)
     [GeneratedRegex(@"\{\{\s*([A-Za-z]+)\.([^{}]+?)\s*\}\}", RegexOptions.CultureInvariant)]
     public static partial Regex PlaceholderRegex();
 
-    [GeneratedRegex(@"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$", RegexOptions.CultureInvariant)]
-    private static partial Regex HeaderNameRegex();
-
     public void Validate(string? name, ScenarioDefinition? definition, ValidationErrors errors)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -112,7 +109,7 @@ public sealed partial class ScenarioValidator(IOptions<SafetyOptions> safety)
                     errors.Add($"{prefix}.parameters", $"{label}: every parameter needs a name.");
                     continue;
                 }
-                if (p.In == ParameterLocation.Header && !HeaderNameRegex().IsMatch(p.Name))
+                if (p.In == ParameterLocation.Header && !HeaderRules.IsValidName(p.Name))
                 {
                     errors.Add($"{prefix}.parameters", $"{label}: '{p.Name}' is not a valid header name.");
                 }

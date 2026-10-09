@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using PerfPilot.Api.ErrorHandling;
 using PerfPilot.Api.Hubs;
 using PerfPilot.Api.Identity;
@@ -17,7 +18,15 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
-    var builder = WebApplication.CreateBuilder(args);
+    // As a Windows service the working directory is System32, so use the app folder as the content root.
+    var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+    {
+        Args = args,
+        ContentRootPath = WindowsServiceHelpers.IsWindowsService() ? AppContext.BaseDirectory : default,
+    });
+    // No-op unless started by the Service Control Manager. Running as a service on Kestrel avoids IIS's
+    // 3-concurrent-request limit on Windows client editions, which live-update connections would exhaust.
+    builder.Host.UseWindowsService(o => o.ServiceName = "PerfPilot");
 
     builder.Host.UseSerilog((context, services, logger) => logger
         .ReadFrom.Configuration(context.Configuration)

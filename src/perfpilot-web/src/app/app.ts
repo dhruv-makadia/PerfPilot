@@ -28,6 +28,9 @@ import { ProductionConfirmComponent } from './shared/run-launcher';
         <a routerLink="/runs" routerLinkActive="active"><i class="pi pi-chart-line"></i> Runs</a>
       </nav>
       <span class="spacer"></span>
+      <a routerLink="/help" routerLinkActive="active" class="help-link" title="User guide">
+        <i class="pi pi-question-circle"></i> Help
+      </a>
       @if (session.usesHeaderIdentity()) {
         <button type="button" class="user-chip" (click)="openNameDialog()" title="Change your display name">
           <i class="pi pi-user"></i> {{ session.userLabel() }}
@@ -41,7 +44,9 @@ import { ProductionConfirmComponent } from './shared/run-launcher';
       @if (!cfg.k6.available) {
         <div class="banner banner-warn">
           <i class="pi pi-exclamation-triangle"></i>
-          k6 is not available on the server: {{ cfg.k6.error }} Runs will fail until k6 is installed or <code>K6:BinaryPath</code> is set.
+          <span>
+            k6 is not available on the server: {{ cfg.k6.error }} Runs will fail until k6 is installed or <code>K6:BinaryPath</code> is set.
+          </span>
         </div>
       }
     }

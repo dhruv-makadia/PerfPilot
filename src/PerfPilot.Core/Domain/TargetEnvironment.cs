@@ -40,6 +40,9 @@ public class TargetEnvironment
     /// <summary>Encrypted JSON body posted to the login endpoint (usually contains credentials).</summary>
     public string? ProtectedLoginBody { get; set; }
 
+    /// <summary>Extra headers sent with the login request. Values are encrypted individually; names stay readable for the UI.</summary>
+    public List<StoredHeader> LoginHeaders { get; set; } = [];
+
     public string? LoginTokenJsonPath { get; set; }
     public string LoginTokenHeaderName { get; set; } = "Authorization";
     public string LoginTokenPrefix { get; set; } = "Bearer ";
@@ -49,4 +52,11 @@ public class TargetEnvironment
     public DateTimeOffset UpdatedAt { get; set; }
 
     public List<ApiSpec> Specs { get; set; } = [];
+}
+
+/// <summary>An HTTP header whose value is stored encrypted (Data Protection payload).</summary>
+public class StoredHeader
+{
+    public string Name { get; set; } = string.Empty;
+    public string ProtectedValue { get; set; } = string.Empty;
 }

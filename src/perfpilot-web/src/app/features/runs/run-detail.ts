@@ -43,6 +43,8 @@ export class RunDetailComponent implements OnInit, OnDestroy {
   private readonly confirm = inject(ConfirmationService);
   private readonly launcher = inject(RunLauncher);
   private watch: { stop: () => void } | null = null;
+  /** Fallback refresh while active: live pushes come only from the instance executing the run. */
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
   private readonly subs: Subscription[] = [];
 
   protected readonly run = signal<RunDetail | null>(null);
@@ -154,6 +156,9 @@ export class RunDetailComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.load();
+    this.pollTimer = setInterval(() => {
+      if (this.isActive()) this.load();
+    }, 5000);
     const watch = this.hub.watchRun(this.id());
     this.watch = watch;
     this.subs.push(
@@ -172,6 +177,7 @@ export class RunDetailComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    if (this.pollTimer) clearInterval(this.pollTimer);
     this.subs.forEach((s) => s.unsubscribe());
     this.watch?.stop();
   }

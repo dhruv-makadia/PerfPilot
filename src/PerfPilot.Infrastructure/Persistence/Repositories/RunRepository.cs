@@ -55,6 +55,7 @@ internal sealed class RunRepository(PerfPilotDbContext db) : IRunRepository
 
     public Task<TestRun?> GetDetailAsync(Guid id, CancellationToken ct) =>
         db.TestRuns
+            .AsNoTracking()
             .Include(r => r.EndpointResults)
             .Include(r => r.ThresholdResults)
             .AsSplitQuery()
@@ -62,6 +63,40 @@ internal sealed class RunRepository(PerfPilotDbContext db) : IRunRepository
 
     public Task<List<Guid>> ListIdsByStatusAsync(RunStatus status, CancellationToken ct) =>
         db.TestRuns.Where(r => r.Status == status).OrderBy(r => r.QueuedAt).Select(r => r.Id).ToListAsync(ct);
+
+    public Task<List<Guid>> ListRunningOnInstanceAsync(string runnerInstance, CancellationToken ct) =>
+        db.TestRuns
+            .Where(r => r.Status == RunStatus.Running && (r.RunnerInstance == null || r.RunnerInstance == runnerInstance))
+            .Select(r => r.Id)
+            .ToListAsync(ct);
+
+    // The conditional updates below run as single UPDATE ... WHERE statements, so they are safe when
+    // several PerfPilot instances share the database.
+    public async Task<bool> TryClaimAsync(Guid id, string runnerInstance, DateTimeOffset startedAt, string workDirectory, CancellationToken ct) =>
+        await db.TestRuns
+            .Where(r => r.Id == id && r.Status == RunStatus.Queued)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.Status, RunStatus.Running)
+                .SetProperty(r => r.StartedAt, startedAt)
+                .SetProperty(r => r.RunnerInstance, runnerInstance)
+                .SetProperty(r => r.WorkDirectory, workDirectory), ct) == 1;
+
+    public async Task<bool> TryCancelQueuedAsync(Guid id, string cancelledBy, DateTimeOffset endedAt, string message, CancellationToken ct) =>
+        await db.TestRuns
+            .Where(r => r.Id == id && r.Status == RunStatus.Queued)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.Status, RunStatus.Cancelled)
+                .SetProperty(r => r.EndedAt, endedAt)
+                .SetProperty(r => r.CancelledBy, cancelledBy)
+                .SetProperty(r => r.ErrorMessage, message), ct) == 1;
+
+    public async Task<bool> RequestCancelAsync(Guid id, string requestedBy, CancellationToken ct) =>
+        await db.TestRuns
+            .Where(r => r.Id == id && r.Status == RunStatus.Running)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.CancelRequestedBy, requestedBy), ct) == 1;
+
+    public Task<string?> GetCancelRequestAsync(Guid id, CancellationToken ct) =>
+        db.TestRuns.AsNoTracking().Where(r => r.Id == id).Select(r => r.CancelRequestedBy).FirstOrDefaultAsync(ct);
 
     public async Task<Dictionary<Guid, TestRun>> GetLatestRunsByScenarioAsync(IEnumerable<Guid> scenarioIds, CancellationToken ct)
     {

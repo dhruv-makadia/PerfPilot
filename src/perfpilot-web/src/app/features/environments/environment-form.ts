@@ -33,6 +33,14 @@ interface EnvForm {
   loginTokenHeaderName: string;
   loginTokenPrefix: string;
   loginScope: LoginScope;
+  loginHeaders: LoginHeaderRow[];
+}
+
+/** A login request header; `stored` rows were loaded from the server and keep their saved value when left blank. */
+interface LoginHeaderRow {
+  name: string;
+  value: string;
+  stored: boolean;
 }
 
 const emptyForm = (): EnvForm => ({
@@ -51,6 +59,7 @@ const emptyForm = (): EnvForm => ({
   loginTokenHeaderName: 'Authorization',
   loginTokenPrefix: 'Bearer ',
   loginScope: 'PerVu',
+  loginHeaders: [],
 });
 
 @Component({
@@ -119,7 +128,33 @@ const emptyForm = (): EnvForm => ({
           @case ('LoginFlow') {
             <label class="field-label" for="loginUrl">Token endpoint (POST)</label>
             <input pInputText id="loginUrl" class="w-full mono" [(ngModel)]="form.loginUrl" placeholder="/auth/login or https://idp.example.com/token" />
-            <label class="field-label" for="loginBody">JSON body</label>
+            <label class="field-label">Login request headers <span class="muted">(optional)</span></label>
+            @if (form.loginHeaders.length > 0) {
+              <table class="simple-table login-headers">
+                <thead><tr><th>Header name</th><th>Value</th><th></th></tr></thead>
+                <tbody>
+                  @for (h of form.loginHeaders; track $index; let hi = $index) {
+                    <tr>
+                      <td><input pInputText class="w-full mono" [(ngModel)]="h.name" placeholder="X-Tenant-Id" [attr.aria-label]="'Login header ' + (hi + 1) + ' name'" /></td>
+                      <td>
+                        <p-password [(ngModel)]="h.value" [feedback]="false" [toggleMask]="true" styleClass="w-full" inputStyleClass="w-full mono"
+                          [placeholder]="h.stored ? 'Saved — leave blank to keep' : 'value'" autocomplete="off" [ariaLabel]="'Login header ' + (hi + 1) + ' value'" />
+                      </td>
+                      <td><p-button icon="pi pi-trash" [text]="true" size="small" severity="danger" (onClick)="removeLoginHeader(hi)" ariaLabel="Remove header" /></td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            }
+            <p-button label="Add header" icon="pi pi-plus" size="small" [text]="true" (onClick)="addLoginHeader()" />
+            <small class="hint">
+              Sent only with the login request, e.g. <code>X-Tenant-Id</code>, <code>Ocp-Apim-Subscription-Key</code> or
+              <code>Authorization: Basic …</code>. Values are encrypted like other secrets. Content-Type defaults to
+              <code>application/json</code>; add a <code>Content-Type</code> header (e.g. <code>application/x-www-form-urlencoded</code>)
+              to send another format.
+            </small>
+
+            <label class="field-label" for="loginBody">Request body <span class="muted">({{ loginContentTypeLabel() }})</span></label>
             <textarea pTextarea id="loginBody" class="w-full code-input" rows="6" [(ngModel)]="form.loginBody"
               [placeholder]="hasStoredLoginBody() ? 'Saved — leave unchanged to keep the stored body' : ''"></textarea>
             @if (loginBodyError()) {
@@ -238,6 +273,7 @@ export class EnvironmentFormComponent implements OnInit {
           loginTokenHeaderName: env.auth.loginTokenHeaderName,
           loginTokenPrefix: env.auth.loginTokenPrefix,
           loginScope: env.auth.loginScope,
+          loginHeaders: (env.auth.loginHeaderNames ?? []).map((name) => ({ name, value: '', stored: true })),
         });
       },
       error: (e) => this.notify.error(e, 'Could not load environment'),
@@ -258,7 +294,31 @@ export class EnvironmentFormComponent implements OnInit {
     return this.hasStoredSecret() ? `${this.existing()?.auth.secretMask} (saved — leave blank to keep)` : '';
   }
 
+  protected addLoginHeader(): void {
+    this.form.loginHeaders.push({ name: '', value: '', stored: false });
+  }
+
+  protected removeLoginHeader(index: number): void {
+    this.form.loginHeaders.splice(index, 1);
+  }
+
+  /**
+   * Content-Type the login body will be sent with: the configured header, JSON by default,
+   * or null when a saved Content-Type exists whose value isn't shown (the server validates it).
+   */
+  private loginContentType(): string | null {
+    const header = this.form.loginHeaders.find((h) => h.name.trim().toLowerCase() === 'content-type');
+    if (!header) return 'application/json';
+    return header.value.trim() || null;
+  }
+
+  protected loginContentTypeLabel(): string {
+    return this.loginContentType() ?? 'saved Content-Type header';
+  }
+
   protected loginBodyError(): string | null {
+    const contentType = this.loginContentType();
+    if (!contentType || !contentType.toLowerCase().includes('json')) return null;
     return this.form.loginBody.trim() ? jsonError(this.form.loginBody) : null;
   }
 
@@ -281,6 +341,9 @@ export class EnvironmentFormComponent implements OnInit {
         loginTokenHeaderName: f.loginTokenHeaderName || null,
         loginTokenPrefix: f.loginTokenPrefix,
         loginScope: f.loginScope,
+        loginHeaders: f.loginHeaders
+          .filter((h) => h.name.trim() || h.value)
+          .map((h) => ({ name: h.name.trim(), value: h.value || null })),
       },
     };
   }

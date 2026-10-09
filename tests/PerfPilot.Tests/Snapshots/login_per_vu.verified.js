@@ -5,7 +5,9 @@
 // Load:        Smoke profile, max 1 VUs, 1m total
 //
 // Secrets are never embedded in this file. Provide them as environment variables:
-//   PERFPILOT_LOGIN_BODY    JSON body posted to the login endpoint
+//   PERFPILOT_LOGIN_BODY    Body posted to the login endpoint
+// Optional: PERFPILOT_LOGIN_HEADERS is a JSON object of login request headers
+//           (default {"Content-Type":"application/json"}).
 // Optional: PERFPILOT_BASE_URL overrides the target base URL.
 //
 // Run it yourself:
@@ -111,8 +113,10 @@ const LOGIN_TOKEN_HEADER = 'Authorization';
 const LOGIN_TOKEN_PREFIX = 'Bearer ';
 const LOGIN_BODY = __ENV.PERFPILOT_LOGIN_BODY;
 if (!LOGIN_BODY) {
-  throw new Error('Environment variable PERFPILOT_LOGIN_BODY is required (JSON body for the login request).');
+  throw new Error('Environment variable PERFPILOT_LOGIN_BODY is required (body for the login request).');
 }
+// Login request headers; values may be secret, so they also come from the environment.
+const LOGIN_HEADERS = JSON.parse(__ENV.PERFPILOT_LOGIN_HEADERS || '{"Content-Type":"application/json"}');
 
 // Supports $.a.b, $.items[0].token and $['key'] style paths.
 function extractJsonPath(obj, path) {
@@ -131,7 +135,7 @@ function extractJsonPath(obj, path) {
 
 function login() {
   const res = http.post(LOGIN_URL, LOGIN_BODY, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: LOGIN_HEADERS,
     tags: { kind: 'auth', name: 'auth: login' },
     responseType: 'text',
   });

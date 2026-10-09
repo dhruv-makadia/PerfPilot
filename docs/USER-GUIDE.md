@@ -8,7 +8,7 @@ A practical guide for QA engineers who are new to performance testing. It covers
 - what happens in the backend when you click **Run**
 - how to **read the results** and decide whether an API performs well
 
-> PerfPilot address: **http://PCLPT208:8080** on the office network, or http://localhost:8080 on the host machine.
+> PerfPilot address: **http://192.168.70.83:8080** on the office network, or http://localhost:8080 on the host machine.
 
 ---
 
@@ -139,7 +139,27 @@ To reach 50 RPS with 0.2 s responses and 1 s think time: `50 × 1.2 = 60 VUs`.
 | OpenAPI URL | Optional. The swagger/openapi JSON or YAML URL. |
 | Production environment | Turn on for production. Every run will then ask you to type the environment name to confirm. **Avoid load testing production** unless it's agreed and scheduled. |
 | Ignore TLS certificate errors | Only for internal QA/staging servers with self-signed certificates. |
-| Authentication | **None**, **Bearer token**, **API key** (header name + value) or **Login flow** (PerfPilot calls a token endpoint with a JSON body and extracts the token using a JSONPath like `$.access_token`). |
+| Authentication | **None**, **Bearer token**, **API key** (header name + value) or **Login flow** (PerfPilot calls a token endpoint with a body, optionally with extra request headers, and extracts the token using a JSONPath like `$.access_token`). See [Login flow settings](#login-flow-settings). |
+
+### Login flow settings
+
+Use **Login flow** when the API needs a token that you get by calling a login/token endpoint first.
+
+| Field | What to enter | Example |
+|-------|---------------|---------|
+| Token endpoint (POST) | Full URL, or a path relative to the base URL | `/auth/login` or `https://idp.company.local/oauth/token` |
+| Login request headers | Optional headers sent **only with the login request**. Click **Add header** for each one. | `X-Tenant-Id: acme`, `Ocp-Apim-Subscription-Key: …`, `Authorization: Basic …` |
+| Request body | The body posted to the token endpoint. JSON by default. | `{"username": "perf-user", "password": "…"}` |
+| Token JSONPath | Where the token is in the login response | `$.access_token`, `$.data.token` |
+| Send token in header / Token prefix | How the token is sent on every test request | `Authorization` + `Bearer ` |
+| When k6 logs in | Once per virtual user, or once for the whole test (shared token) | |
+
+Notes on login headers:
+
+- **Values are secrets.** They're encrypted, never shown again, and passed to k6 as an environment variable, never written into the script. When you edit the environment later, the value boxes are empty with "Saved — leave blank to keep". Leave them blank to keep the saved value, or type a new value to replace it. Removing a row deletes that header.
+- **Content-Type** is `application/json` unless you add a `Content-Type` header. For OAuth-style token endpoints that expect form data, add `Content-Type: application/x-www-form-urlencoded` and write the body as `grant_type=client_credentials&client_id=…&client_secret=…`.
+- `Host`, `Content-Length`, `Transfer-Encoding` and `Connection` are set automatically and can't be configured.
+- These headers apply to the **login request only**. For headers that every *test* request needs (e.g. a tenant header on all API calls), add a **Header** parameter to each endpoint in the scenario.
 
 Click **Test connection**. The PerfPilot *server* calls the API and tells you what it sees:
 
@@ -480,7 +500,7 @@ You don't need this to use PerfPilot, but it helps when interpreting results or 
    - **SLAs** become k6 `thresholds`, e.g. `'http_req_duration{endpoint:ep1}': ['p(95)<=500']`.
    - **Endpoints** become a list with weights, parameters, body templates and expected codes. Each gets a key (`ep1`, `ep2`, …) used to tag its requests.
    - **The CSV** is parsed on the server and embedded in the script as a k6 `SharedArray`: one read-only copy in memory shared by all VUs, however many there are.
-   - **Secrets are not written into the script.** The script reads them from environment variables (`PERFPILOT_BEARER_TOKEN`, `PERFPILOT_API_KEY`, `PERFPILOT_LOGIN_BODY`), which PerfPilot passes only to the k6 process.
+   - **Secrets are not written into the script.** The script reads them from environment variables (`PERFPILOT_BEARER_TOKEN`, `PERFPILOT_API_KEY`, `PERFPILOT_LOGIN_BODY`, `PERFPILOT_LOGIN_HEADERS`), which PerfPilot passes only to the k6 process.
 4. **Queue.** The run is queued (status *Queued*). A background worker on the server runs one test at a time (configurable).
 5. **Execution.** The worker creates a folder `work\runs\<run-id>`, writes `script.js`, and starts:
    `k6 run --out json=metrics.json --summary-export=summary.json script.js`
@@ -568,7 +588,7 @@ Put all the columns in the one scenario CSV ([section 7](#7-test-data-for-multip
 The numbers cover only the part that ran. Don't compare them with full runs.
 
 **The run failed with "A stored secret could not be decrypted".**
-The environment's token/key was saved on a different PerfPilot installation. Edit the environment, re-enter the secret and save.
+The environment's token/key was encrypted with a key that this PerfPilot installation doesn't have, for example after a move to another server or database. Edit the environment, re-enter the secret and save. (The IIS site and a local `dotnet run` can share secrets when both use `DataProtection:Store = Database`.)
 
 **Can I run the script myself?**
 Yes: **k6 script → Download .js**, then `k6 run -e PERFPILOT_BEARER_TOKEN=<token> script.js` (the script header lists the variables it needs).

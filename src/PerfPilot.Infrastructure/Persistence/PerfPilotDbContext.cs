@@ -1,10 +1,11 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using PerfPilot.Core.Domain;
 
 namespace PerfPilot.Infrastructure.Persistence;
 
-public sealed class PerfPilotDbContext(DbContextOptions<PerfPilotDbContext> options) : DbContext(options)
+public sealed class PerfPilotDbContext(DbContextOptions<PerfPilotDbContext> options) : DbContext(options), IDataProtectionKeyContext
 {
     public DbSet<TargetEnvironment> Environments => Set<TargetEnvironment>();
     public DbSet<ApiSpec> ApiSpecs => Set<ApiSpec>();
@@ -13,6 +14,9 @@ public sealed class PerfPilotDbContext(DbContextOptions<PerfPilotDbContext> opti
     public DbSet<TestRun> TestRuns => Set<TestRun>();
     public DbSet<RunEndpointResult> RunEndpointResults => Set<RunEndpointResult>();
     public DbSet<RunThresholdResult> RunThresholdResults => Set<RunThresholdResult>();
+
+    /// <summary>Data Protection key ring, when DataProtection:Store is "Database" (shared by all instances using this database).</summary>
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder builder)
     {
@@ -32,6 +36,7 @@ public sealed class PerfPilotDbContext(DbContextOptions<PerfPilotDbContext> opti
             e.Property(x => x.ApiKeyHeaderName).HasMaxLength(200);
             e.Property(x => x.LoginUrl).HasMaxLength(2048);
             e.Property(x => x.LoginTokenJsonPath).HasMaxLength(500);
+            e.Property(x => x.LoginHeaders).HasJsonConversion();
             e.Property(x => x.LoginTokenHeaderName).HasMaxLength(200);
             e.Property(x => x.LoginTokenPrefix).HasMaxLength(100);
             e.HasMany(x => x.Specs).WithOne(s => s.Environment).HasForeignKey(s => s.EnvironmentId).OnDelete(DeleteBehavior.Cascade);
@@ -92,6 +97,8 @@ public sealed class PerfPilotDbContext(DbContextOptions<PerfPilotDbContext> opti
             e.Property(x => x.StartedBy).HasMaxLength(200).IsRequired();
             e.Property(x => x.CancelledBy).HasMaxLength(200);
             e.Property(x => x.WorkDirectory).HasMaxLength(1024);
+            e.Property(x => x.RunnerInstance).HasMaxLength(300);
+            e.Property(x => x.CancelRequestedBy).HasMaxLength(200);
             e.Property(x => x.ScenarioSnapshot).HasJsonConversion();
             e.Property(x => x.ThresholdPlan).HasJsonConversion();
             e.Property(x => x.TimeSeries).HasJsonConversion();

@@ -51,6 +51,12 @@ public class TestRun
     public string? CancelledBy { get; set; }
     public string? WorkDirectory { get; set; }
 
+    /// <summary>The PerfPilot instance that claimed and executes this run (several instances can share one database).</summary>
+    public string? RunnerInstance { get; set; }
+
+    /// <summary>Set when a user on another instance asks to cancel; the executing instance polls for it.</summary>
+    public string? CancelRequestedBy { get; set; }
+
     /// <summary>Raw k6 --summary-export JSON.</summary>
     public string? SummaryJson { get; set; }
 

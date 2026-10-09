@@ -27,18 +27,32 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException("Connection string 'PerfPilot' is not configured.");
         services.AddDbContext<PerfPilotDbContext>(o => o.UseSqlServer(connectionString, sql => sql.EnableRetryOnFailure(3)));
 
-        var keysDirectory = configuration["DataProtection:KeysDirectory"] is { Length: > 0 } configured ? configured : "keys";
-        if (!Path.IsPathRooted(keysDirectory))
+        var dataProtection = services.AddDataProtection().SetApplicationName("PerfPilot");
+        if (string.Equals(configuration["DataProtection:Store"], "Database", StringComparison.OrdinalIgnoreCase))
         {
-            keysDirectory = Path.Combine(contentRootPath, keysDirectory);
+            // Shared key ring: every instance using this database (e.g. IIS and local dev) can decrypt the same secrets.
+            // Keys are stored unencrypted in the DataProtectionKeys table, so restrict who can read the database.
+            dataProtection.PersistKeysToDbContext<PerfPilotDbContext>();
         }
-        var dataProtection = services.AddDataProtection()
-            .SetApplicationName("PerfPilot")
-            .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory));
-        if (OperatingSystem.IsWindows())
+        else
         {
-            dataProtection.ProtectKeysWithDpapi();
+            var keysDirectory = configuration["DataProtection:KeysDirectory"] is { Length: > 0 } configured ? configured : "keys";
+            if (!Path.IsPathRooted(keysDirectory))
+            {
+                keysDirectory = Path.Combine(contentRootPath, keysDirectory);
+            }
+            dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keysDirectory));
+            if (OperatingSystem.IsWindows())
+            {
+                dataProtection.ProtectKeysWithDpapi();
+            }
         }
+
+        // Identifies this instance on the runs it executes, so several instances can share one database safely.
+        var instanceName = configuration["K6:InstanceName"] is { Length: > 0 } name
+            ? name
+            : $"{Environment.MachineName}:{Path.GetFullPath(contentRootPath).TrimEnd('\\', '/')}";
+        services.AddSingleton(new RunnerIdentity(instanceName.Length > 300 ? instanceName[..300] : instanceName));
 
         services.AddHttpClient(HttpClientNames.Default)
             .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(ignoreTls: false));

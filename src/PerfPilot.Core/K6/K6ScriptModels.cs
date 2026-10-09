@@ -9,6 +9,9 @@ public static class K6EnvVars
     public const string BearerToken = "PERFPILOT_BEARER_TOKEN";
     public const string ApiKey = "PERFPILOT_API_KEY";
     public const string LoginBody = "PERFPILOT_LOGIN_BODY";
+
+    /// <summary>JSON object of headers for the login request (optional; defaults to JSON content type).</summary>
+    public const string LoginHeaders = "PERFPILOT_LOGIN_HEADERS";
 }
 
 /// <summary>Non-secret environment settings needed to generate a script.</summary>

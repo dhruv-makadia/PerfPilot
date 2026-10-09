@@ -80,32 +80,27 @@ public sealed class RunService(
     public async Task<RunDetailDto> CancelAsync(Guid id, CancellationToken ct)
     {
         var run = await runs.GetAsync(id, ct) ?? throw new NotFoundException("Run", id);
-        switch (run.Status)
+        if (run.IsFinished)
         {
-            case RunStatus.Queued:
-                run.Status = RunStatus.Cancelled;
-                run.EndedAt = clock.GetUtcNow();
-                run.CancelledBy = currentUser.Name;
-                run.ErrorMessage = "Cancelled before it started.";
-                await runs.UpdateAsync(run, ct);
-                // The worker may have picked it up in the meantime; signal it too.
-                canceller.RequestCancel(id, currentUser.Name);
-                await notifier.RunStatusChangedAsync(new RunStatusMessage(run.Id, run.Status, null, run.ErrorMessage), ct);
-                logger.LogInformation("Queued run {RunId} cancelled by {User}", id, currentUser.Name);
-                break;
-
-            case RunStatus.Running:
-                // The executor owns the run row while it runs; it records the cancellation when k6 stops.
-                if (!canceller.RequestCancel(id, currentUser.Name))
-                {
-                    throw new ConflictException("The run is not active on this server; it may have just finished. Refresh to see its status.");
-                }
-                logger.LogInformation("Cancellation of running run {RunId} requested by {User}", id, currentUser.Name);
-                break;
-
-            default:
-                throw new ConflictException($"The run has already finished with status {run.Status}.");
+            throw new ConflictException($"The run has already finished with status {run.Status}.");
         }
+
+        const string notStartedMessage = "Cancelled before it started.";
+        if (run.Status == RunStatus.Queued &&
+            await runs.TryCancelQueuedAsync(id, currentUser.Name, clock.GetUtcNow(), notStartedMessage, ct))
+        {
+            await notifier.RunStatusChangedAsync(new RunStatusMessage(id, RunStatus.Cancelled, null, notStartedMessage), ct);
+            logger.LogInformation("Queued run {RunId} cancelled by {User}", id, currentUser.Name);
+            return ToDetail(await GetDetailEntityAsync(id, ct));
+        }
+
+        // Running (or claimed by a runner a moment ago). The executing instance owns the run row and records the
+        // cancellation when k6 stops: signal it directly if it's this instance, otherwise through the database.
+        if (!canceller.RequestCancel(id, currentUser.Name) && !await runs.RequestCancelAsync(id, currentUser.Name, ct))
+        {
+            throw new ConflictException("The run has already finished. Refresh to see its status.");
+        }
+        logger.LogInformation("Cancellation of running run {RunId} requested by {User}", id, currentUser.Name);
         return ToDetail(await GetDetailEntityAsync(id, ct));
     }
 

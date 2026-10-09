@@ -25,7 +25,8 @@ public sealed record AuthConfigDto(
     string? LoginTokenJsonPath,
     string LoginTokenHeaderName,
     string LoginTokenPrefix,
-    LoginScope LoginScope);
+    LoginScope LoginScope,
+    IReadOnlyList<string> LoginHeaderNames);
 
 public sealed record SaveEnvironmentRequest(
     string Name,
@@ -38,6 +39,8 @@ public sealed record SaveEnvironmentRequest(
 /// <summary>
 /// Auth settings posted by the UI. <see cref="Secret"/> and <see cref="LoginBody"/> left null or empty
 /// keep the stored value; set <see cref="ClearSecret"/> to remove it.
+/// <see cref="LoginHeaders"/> null keeps the stored headers; a list replaces them, and an entry with an empty
+/// value keeps the stored value of the header with the same name.
 /// </summary>
 public sealed record SaveAuthConfig(
     AuthType Type,
@@ -49,7 +52,11 @@ public sealed record SaveAuthConfig(
     string? LoginTokenJsonPath,
     string? LoginTokenHeaderName,
     string? LoginTokenPrefix,
-    LoginScope LoginScope);
+    LoginScope LoginScope,
+    IReadOnlyList<HeaderInput>? LoginHeaders = null);
+
+/// <summary>A header posted by the UI; an empty <see cref="Value"/> means "keep the stored value".</summary>
+public sealed record HeaderInput(string Name, string? Value);
 
 /// <summary>Test-connection request; tests the posted (possibly unsaved) settings, merging stored secrets when an id is given.</summary>
 public sealed record TestConnectionRequest(Guid? EnvironmentId, SaveEnvironmentRequest Environment);
@@ -89,7 +96,8 @@ public sealed record ResolvedAuth(
     string? LoginTokenJsonPath,
     string LoginTokenHeaderName,
     string LoginTokenPrefix,
-    LoginScope LoginScope)
+    LoginScope LoginScope,
+    IReadOnlyDictionary<string, string>? LoginHeaders = null)
 {
     public static ResolvedAuth None { get; } = new(AuthType.None, null, null, null, null, null, "Authorization", "Bearer ", LoginScope.PerVu);
 }

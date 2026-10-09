@@ -47,5 +47,10 @@ export const routes: Routes = [
     loadComponent: () => import('./features/runs/run-detail').then((m) => m.RunDetailComponent),
     title: 'Run results · PerfPilot',
   },
+  {
+    path: 'help',
+    loadComponent: () => import('./features/help/help-page').then((m) => m.HelpPageComponent),
+    title: 'Help · PerfPilot',
+  },
   { path: '**', redirectTo: 'scenarios' },
 ];

@@ -94,6 +94,8 @@ public class K6ScriptGeneratorTests
         Assert.Contains("const LOGIN_URL = 'https://idp.local/token';", script.Content);
         Assert.Contains("export function setup() {\n  return { token: login() };\n}", script.Content);
         Assert.Contains("headers[LOGIN_TOKEN_HEADER] = LOGIN_TOKEN_PREFIX + data.token;", script.Content);
+        Assert.Contains("const LOGIN_HEADERS = JSON.parse(__ENV.PERFPILOT_LOGIN_HEADERS || '{\"Content-Type\":\"application/json\"}');", script.Content);
+        Assert.Contains("    headers: LOGIN_HEADERS,\n", script.Content);
         Assert.DoesNotContain("let vuToken", script.Content);
         Assert.Contains("insecureSkipTLSVerify: true", script.Content);
         Assert.Equal([K6EnvVars.LoginBody], script.RequiredEnvironmentVariables);

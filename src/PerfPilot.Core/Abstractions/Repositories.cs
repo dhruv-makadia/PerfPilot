@@ -40,10 +40,24 @@ public interface IRunRepository
     Task<PagedResult<TestRun>> ListAsync(RunQuery query, CancellationToken ct);
     Task<TestRun?> GetAsync(Guid id, CancellationToken ct);
 
-    /// <summary>Loads the run with endpoint results, threshold results and series.</summary>
+    /// <summary>Loads the run with endpoint results, threshold results and series (read-only, always fresh from the database).</summary>
     Task<TestRun?> GetDetailAsync(Guid id, CancellationToken ct);
 
     Task<List<Guid>> ListIdsByStatusAsync(RunStatus status, CancellationToken ct);
+
+    /// <summary>Running runs claimed by the given instance (or by no instance, from older versions).</summary>
+    Task<List<Guid>> ListRunningOnInstanceAsync(string runnerInstance, CancellationToken ct);
+
+    /// <summary>Atomically moves a Queued run to Running for this instance. False if another instance claimed it or it was cancelled.</summary>
+    Task<bool> TryClaimAsync(Guid id, string runnerInstance, DateTimeOffset startedAt, string workDirectory, CancellationToken ct);
+
+    /// <summary>Atomically cancels a run that is still Queued. False if it already started or finished.</summary>
+    Task<bool> TryCancelQueuedAsync(Guid id, string cancelledBy, DateTimeOffset endedAt, string message, CancellationToken ct);
+
+    /// <summary>Flags a Running run for cancellation by whichever instance executes it. False if it isn't running.</summary>
+    Task<bool> RequestCancelAsync(Guid id, string requestedBy, CancellationToken ct);
+
+    Task<string?> GetCancelRequestAsync(Guid id, CancellationToken ct);
     Task<Dictionary<Guid, TestRun>> GetLatestRunsByScenarioAsync(IEnumerable<Guid> scenarioIds, CancellationToken ct);
     Task AddAsync(TestRun run, CancellationToken ct);
     Task UpdateAsync(TestRun run, CancellationToken ct);

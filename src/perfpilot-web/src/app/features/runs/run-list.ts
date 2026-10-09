@@ -88,6 +88,8 @@ export class RunListComponent implements OnInit, OnDestroy {
   private readonly notify = inject(NotifyService);
   private readonly hub = inject(RunHubService);
   private watch: { stop: () => void } | null = null;
+  /** Fallback refresh while runs are active: status pushes come only from the instance executing a run. */
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
   private sub: Subscription | null = null;
 
   protected readonly runs = signal<RunListItem[]>([]);
@@ -119,9 +121,13 @@ export class RunListComponent implements OnInit, OnDestroy {
     const watch = this.hub.watchRunList();
     this.watch = watch;
     this.sub = watch.status.subscribe(() => this.load());
+    this.pollTimer = setInterval(() => {
+      if (this.runs().some((r) => r.status === 'Queued' || r.status === 'Running')) this.load();
+    }, 10000);
   }
 
   ngOnDestroy(): void {
+    if (this.pollTimer) clearInterval(this.pollTimer);
     this.sub?.unsubscribe();
     this.watch?.stop();
   }

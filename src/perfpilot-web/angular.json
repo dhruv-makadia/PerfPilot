@@ -36,7 +36,10 @@
               "base": "../PerfPilot.Api/wwwroot",
               "browser": ""
             },
-            "deleteOutputPath": true
+            "deleteOutputPath": true,
+            "loader": {
+              ".md": "text"
+            }
           },
           "configurations": {
             "production": {

@@ -14,7 +14,7 @@ You import an OpenAPI spec, pick endpoints, set a load profile and SLA threshold
 - **k6 generation and execution**: a read-only script preview you can download, background execution with a queue, live metrics over SignalR every 2 s, graceful cancellation, safety caps, production confirmation and run attribution.
 - **Results**: pass/fail verdict, per-endpoint table with breaches highlighted, charts over time (latency percentiles, RPS and VUs, error rate), run history filters, a self-contained HTML report, and downloads of the exact script and the raw k6 summary.
 
-> **New to performance testing?** Read the [User Guide](docs/USER-GUIDE.md). It covers the terms, building scenarios,
+> **New to performance testing?** Read the [User Guide](docs/USER-GUIDE.md), also available in the app under **Help** (top bar). It covers the terms, building scenarios,
 > preparing test data for multiple endpoints, reading results, and what happens in the backend.
 
 ---
@@ -130,6 +130,33 @@ dotnet publish src/PerfPilot.Api -c Release -o publish
 # copy "publish" to the server, set ConnectionStrings__PerfPilot and K6__BinaryPath, run PerfPilot.Api.exe
 ```
 
+### As a Windows service (recommended on Windows 10/11)
+
+Full step-by-step instructions (any host machine, updates, rollback, moving hosts, IIS, HTTPS): **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+
+PerfPilot can run as a Windows service on its built-in web server (Kestrel), with no IIS needed.
+
+> **Don't host PerfPilot in IIS on a Windows client edition.** IIS on Windows 10/11 limits concurrent requests to **3 (Home)** or **10 (Pro)** and queues the rest.
+> Every browser tab on a Runs page keeps a live-update connection open, so a few users fill the limit and the whole UI hangs until a connection closes.
+> IIS on Windows Server has no such limit.
+
+In an admin PowerShell:
+
+```powershell
+cd src\perfpilot-web; npm ci; npm run build; cd ..\..
+dotnet publish src\PerfPilot.Api -c Release -o C:\PerfPilot
+
+# Settings go in C:\PerfPilot\appsettings.Production.json (connection string, K6:BinaryPath, DataProtection:Store)
+icacls C:\PerfPilot /grant "NT AUTHORITY\LocalService:(OI)(CI)M"
+icacls C:\Tools\k6 /grant "NT AUTHORITY\LocalService:(OI)(CI)RX"
+
+sc.exe create PerfPilot binPath= "C:\PerfPilot\PerfPilot.Api.exe --urls http://0.0.0.0:8080" start= delayed-auto obj= "NT AUTHORITY\LocalService" DisplayName= "PerfPilot"
+sc.exe failure PerfPilot reset= 86400 actions= restart/60000/restart/60000/restart/60000
+sc.exe start PerfPilot
+```
+
+To update: `sc.exe stop PerfPilot`, publish again to `C:\PerfPilot`, then `sc.exe start PerfPilot`. Logs are in `C:\PerfPilot\logs`.
+
 ### UI development (hot reload)
 
 ```powershell
@@ -167,7 +194,8 @@ Downloaded scripts never contain secrets. They read them from environment variab
 |----------|-----------|
 | `PERFPILOT_BEARER_TOKEN` | Auth = Bearer token |
 | `PERFPILOT_API_KEY` | Auth = API key |
-| `PERFPILOT_LOGIN_BODY` | Auth = Login flow (the JSON body for the token endpoint) |
+| `PERFPILOT_LOGIN_BODY` | Auth = Login flow (the body for the token endpoint) |
+| `PERFPILOT_LOGIN_HEADERS` | Auth = Login flow, optional: JSON object of login request headers, e.g. `{"Content-Type":"application/json","X-Tenant-Id":"acme"}` (default: JSON content type only) |
 | `PERFPILOT_BASE_URL` | Optional: point the script at a different base URL |
 
 ```powershell
@@ -223,6 +251,7 @@ All settings are in `src/PerfPilot.Api/appsettings.json` and can be overridden w
 | `K6:LiveUpdateIntervalSeconds` | `2` | Live metric push interval |
 | `K6:GracefulStopTimeoutSeconds` | `20` | Wait after a graceful stop before killing k6 |
 | `K6:DeleteRawOutputAfterRun` | `false` | Delete `metrics.json` (can be large) after results are saved |
+| `K6:InstanceName` | machine name + app folder | Name recorded on the runs this instance executes. Only needs setting if two instances share a machine *and* a folder |
 | `Safety:MaxVus` | `500` | Highest stage target allowed |
 | `Safety:MaxDurationMinutes` | `120` | Longest total test duration allowed |
 | `SpecImport:DefaultTimeoutSeconds` | `30` | Default spec download timeout |
@@ -230,12 +259,27 @@ All settings are in `src/PerfPilot.Api/appsettings.json` and can be overridden w
 | `SpecImport:MaxSpecSizeMb` | `25` | Maximum spec size (download or upload) |
 | `ConnectionTest:TimeoutSeconds` | `15` | Timeout per check in "Test connection" |
 | `Identity:Mode` | `Header` | `Header`: the UI asks for a display name. `Windows`: Negotiate (Kerberos/NTLM) authentication |
-| `DataProtection:KeysDirectory` | `keys` | Data Protection key ring (encrypts stored secrets) |
+| `DataProtection:Store` | `FileSystem` | Where the key ring that encrypts stored secrets lives. `FileSystem`: the `KeysDirectory` folder. `Database`: the `DataProtectionKeys` table, shared by every instance using the database |
+| `DataProtection:KeysDirectory` | `keys` | Key ring folder when `Store` is `FileSystem` |
 | `Database:ApplyMigrationsOnStartup` | `true` | Apply EF Core migrations at startup |
 | `Serilog` | Console plus rolling file `logs/` | Structured logging configuration |
 
-> **Back up the `keys` folder.** Stored secrets (tokens, API keys, login bodies) can only be decrypted with this key ring.
-> On Windows the keys are additionally protected with DPAPI for the account running PerfPilot. If keys are lost, re-enter the environment secrets.
+> **Key ring and secrets.** Stored secrets (tokens, API keys, login bodies, login headers) can only be decrypted with the key ring that encrypted them.
+> - With `Store = FileSystem`, back up the `keys` folder. On Windows its keys are also protected with DPAPI for the account running PerfPilot, so only that account can use them.
+> - With `Store = Database`, the keys are kept unencrypted in the `DataProtectionKeys` table. Anyone who can read the database can decrypt the stored secrets, so restrict database access.
+> - If the key ring is lost or changed, re-enter the environment secrets.
+
+### Several instances sharing one database
+
+You can run more than one PerfPilot instance against the same database, for example the IIS site and a developer's `dotnet run`:
+
+1. Point both at the same `ConnectionStrings:PerfPilot` and set `DataProtection:Store` to `Database` on both, so either one can decrypt secrets saved by the other.
+2. Each run is executed by the instance it was started on. Instances claim runs atomically and record their name on the run (`RunnerInstance`), so a run never executes twice.
+3. **Cancel** works from either instance: the request goes through the database, and the executing instance stops k6 within about 3 seconds.
+4. On startup, an instance only marks *its own* interrupted runs as failed.
+5. Live charts stream from the executing instance. Pages opened on the other instance refresh every 5–10 seconds instead.
+
+Each instance has its own `K6:MaxConcurrentRuns` limit and generates load from its own machine.
 
 ---
 

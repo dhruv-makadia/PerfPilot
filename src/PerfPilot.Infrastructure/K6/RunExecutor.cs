@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -21,9 +22,13 @@ public sealed class RunExecutor(
     K6Paths paths,
     IHttpClientFactory httpClientFactory,
     IOptions<K6Options> options,
+    RunnerIdentity identity,
     TimeProvider clock,
     ILogger<RunExecutor> logger)
 {
+    /// <summary>How often a running test checks the database for a cancel request made on another instance.</summary>
+    private static readonly TimeSpan CancelRequestPollInterval = TimeSpan.FromSeconds(3);
+
     public const string ScriptFile = "script.js";
     public const string MetricsFile = "metrics.json";
     public const string SummaryFile = "summary.json";
@@ -39,21 +44,23 @@ public sealed class RunExecutor(
         var environments = scope.ServiceProvider.GetRequiredService<IEnvironmentRepository>();
         var environmentService = scope.ServiceProvider.GetRequiredService<EnvironmentService>();
 
-        var run = await runs.GetAsync(runId, CancellationToken.None);
-        if (run is null || run.Status != RunStatus.Queued)
+        // Claim atomically: when several instances share the database, exactly one of them starts the run.
+        var workDir = paths.RunDirectory(runId);
+        if (!await runs.TryClaimAsync(runId, identity.Name, clock.GetUtcNow(), workDir, CancellationToken.None))
         {
-            logger.LogInformation("Skipping run {RunId}: status is {Status}", runId, run?.Status.ToString() ?? "missing");
+            logger.LogInformation("Skipping run {RunId}: it was cancelled or claimed by another instance", runId);
+            return;
+        }
+        var run = await runs.GetAsync(runId, CancellationToken.None);
+        if (run is null)
+        {
             return;
         }
 
         using var logScope = logger.BeginScope(new Dictionary<string, object> { ["RunId"] = runId });
-        var workDir = paths.RunDirectory(runId);
-        run.Status = RunStatus.Running;
-        run.StartedAt = clock.GetUtcNow();
-        run.WorkDirectory = workDir;
-        await runs.UpdateAsync(run, CancellationToken.None);
         await NotifyStatusAsync(run);
-        logger.LogInformation("Run {RunId} started: scenario {ScenarioName} on {EnvironmentName}", runId, run.ScenarioName, run.EnvironmentName);
+        logger.LogInformation("Run {RunId} started on {Instance}: scenario {ScenarioName} on {EnvironmentName}",
+            runId, identity.Name, run.ScenarioName, run.EnvironmentName);
 
         try
         {
@@ -128,6 +135,7 @@ public sealed class RunExecutor(
         var tailTask = K6OutputTailer.TailAsync(Path.Combine(workDir, MetricsFile), aggregator.IngestLine, () => k6.HasExited, CancellationToken.None);
         using var liveCts = new CancellationTokenSource();
         var liveTask = PushLiveAsync(run.Id, aggregator, TimeSpan.FromSeconds(Math.Max(0.5, opts.LiveUpdateIntervalSeconds)), liveCts.Token);
+        var cancelWatchTask = WatchCancelRequestsAsync(run.Id, cancellation, liveCts.Token);
 
         var cancelled = await Task.WhenAny(k6.ExitTask, Task.Delay(Timeout.Infinite, cancellation.Token)) != k6.ExitTask;
         if (cancelled)
@@ -140,6 +148,7 @@ public sealed class RunExecutor(
         await tailTask;
         await liveCts.CancelAsync();
         await liveTask;
+        await cancelWatchTask;
         await PushSnapshotAsync(run.Id, aggregator);
 
         run.ExitCode = k6.ExitCode;
@@ -156,6 +165,34 @@ public sealed class RunExecutor(
             // 0 = success, 99 = thresholds breached (a completed run with a failed verdict).
             run.Status = RunStatus.Failed;
             run.ErrorMessage = DescribeFailure(k6.ExitCode, k6.RecentOutput());
+        }
+    }
+
+    /// <summary>Picks up cancel requests recorded in the database by another PerfPilot instance.</summary>
+    private async Task WatchCancelRequestsAsync(Guid runId, RunCancellation cancellation, CancellationToken ct)
+    {
+        try
+        {
+            while (!cancellation.IsCancellationRequested)
+            {
+                await Task.Delay(CancelRequestPollInterval, ct);
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var requestedBy = await scope.ServiceProvider.GetRequiredService<IRunRepository>().GetCancelRequestAsync(runId, ct);
+                if (requestedBy is not null)
+                {
+                    logger.LogInformation("Run {RunId}: cancellation requested by {User} from another instance", runId, requestedBy);
+                    cancellation.Cancel(requestedBy);
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Run finished.
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Stopped watching for cancel requests on run {RunId}", runId);
         }
     }
 
@@ -217,6 +254,7 @@ public sealed class RunExecutor(
                 break;
             case AuthType.LoginFlow when auth.LoginBody is not null:
                 vars[K6EnvVars.LoginBody] = auth.LoginBody;
+                vars[K6EnvVars.LoginHeaders] = JsonSerializer.Serialize(HeaderRules.BuildLoginHeaders(auth.LoginHeaders));
                 break;
         }
         return vars;

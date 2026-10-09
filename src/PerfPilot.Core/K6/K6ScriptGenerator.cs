@@ -165,6 +165,11 @@ public sealed class K6ScriptGenerator : IK6ScriptGenerator
         {
             sb.Append("// This environment uses no authentication.\n");
         }
+        if (input.Environment.AuthType == AuthType.LoginFlow)
+        {
+            sb.Append("// Optional: ").Append(K6EnvVars.LoginHeaders).Append(" is a JSON object of login request headers\n");
+            sb.Append("//           (default {\"Content-Type\":\"application/json\"}).\n");
+        }
         sb.Append("// Optional: ").Append(K6EnvVars.BaseUrl).Append(" overrides the target base URL.\n");
         sb.Append("//\n");
         sb.Append("// Run it yourself:\n");
@@ -181,7 +186,7 @@ public sealed class K6ScriptGenerator : IK6ScriptGenerator
     {
         K6EnvVars.BearerToken => "Static bearer token",
         K6EnvVars.ApiKey => "API key value",
-        K6EnvVars.LoginBody => "JSON body posted to the login endpoint",
+        K6EnvVars.LoginBody => "Body posted to the login endpoint",
         _ => string.Empty,
     };
 
@@ -331,8 +336,12 @@ public sealed class K6ScriptGenerator : IK6ScriptGenerator
         sb.Append("const LOGIN_TOKEN_PREFIX = ").Append(Js(env.LoginTokenPrefix)).Append(";\n");
         sb.Append("const LOGIN_BODY = __ENV.").Append(K6EnvVars.LoginBody).Append(";\n");
         sb.Append("if (!LOGIN_BODY) {\n");
-        sb.Append("  throw new Error('Environment variable ").Append(K6EnvVars.LoginBody).Append(" is required (JSON body for the login request).');\n");
-        sb.Append("}\n\n");
+        sb.Append("  throw new Error('Environment variable ").Append(K6EnvVars.LoginBody).Append(" is required (body for the login request).');\n");
+        sb.Append("}\n");
+        sb.Append("// Login request headers; values may be secret, so they also come from the environment.\n");
+        sb.Append("const LOGIN_HEADERS = JSON.parse(__ENV.").Append(K6EnvVars.LoginHeaders)
+            .Append(" || ").Append(Js(JsonSerializer.Serialize(new Dictionary<string, string> { [HeaderRules.ContentType] = HeaderRules.DefaultLoginContentType }, CompactJson)))
+            .Append(");\n\n");
         sb.Append("// Supports $.a.b, $.items[0].token and $['key'] style paths.\n");
         sb.Append("function extractJsonPath(obj, path) {\n");
         sb.Append("  let p = String(path).trim();\n");
@@ -349,7 +358,7 @@ public sealed class K6ScriptGenerator : IK6ScriptGenerator
         sb.Append("}\n\n");
         sb.Append("function login() {\n");
         sb.Append("  const res = http.post(LOGIN_URL, LOGIN_BODY, {\n");
-        sb.Append("    headers: { 'Content-Type': 'application/json' },\n");
+        sb.Append("    headers: LOGIN_HEADERS,\n");
         sb.Append("    tags: { kind: 'auth', name: 'auth: login' },\n");
         sb.Append("    responseType: 'text',\n");
         sb.Append("  });\n");

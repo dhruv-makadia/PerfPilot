@@ -36,6 +36,7 @@ export interface AuthConfig {
   loginTokenHeaderName: string;
   loginTokenPrefix: string;
   loginScope: LoginScope;
+  loginHeaderNames: string[];
 }
 
 export interface Environment {
@@ -62,6 +63,8 @@ export interface SaveAuthConfig {
   loginTokenHeaderName: string | null;
   loginTokenPrefix: string | null;
   loginScope: LoginScope;
+  /** null keeps stored headers; an entry with a null value keeps that header's stored value. */
+  loginHeaders: { name: string; value: string | null }[] | null;
 }
 
 export interface SaveEnvironmentRequest {
